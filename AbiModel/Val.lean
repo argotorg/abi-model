@@ -8,6 +8,7 @@ def Value : Ty → Type
   | .bool => Bool
   | .pair a b => Value a × Value b
   | .sum a b => Value a ⊕ Value b
-  | .tup a => Value a
+  | .tup a => Value a -- why so?
+  | .arr a => List (Value a)
 
 end AbiModel
