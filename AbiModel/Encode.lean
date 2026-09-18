@@ -29,7 +29,9 @@ mutual
     | .sum a b, Sum.inr y => let (enc_head, enc_tail) := encode_ht b y headSize head tail
                              (1 :: enc_head ++ List.replicate (padR a b) 0, enc_tail)
     | .tup a, x => encode_ht a x headSize head tail
-    | .arr a, vals => encodeArr a vals headSize [] []
+    | .arr a, vals => let offset := [BitVec.ofNat 256 (headSize + tail.length + 1)]
+                      let l :=  [BitVec.ofNat 256 (List.length vals)]
+                      encodeArr a vals headSize (head ++ offset) (tail ++ l)
   termination_by (sizeOf t, 1)
 
   def encodeArr (a : Ty) (vals : List (Value a)) (headSize : Nat) (head tail: Wire) : Wire × Wire :=
@@ -38,8 +40,7 @@ mutual
       | value :: rest =>
           let (enc_head, enc_tail) := encode_ht a value (headSize + tail.length) [] []
           let encoded := enc_head ++ enc_tail
-          let offset := [BitVec.ofNat 256 (headSize + tail.length)]
-          encodeArr a rest (headSize) (head ++ offset) (tail ++ encoded)
+          encodeArr a rest (headSize) head (tail ++ encoded)
     termination_by (sizeOf a, vals.length + 1)
 
 end
@@ -58,5 +59,11 @@ def encode (t : Ty) (v : Value t) : Wire :=
   let headSize := headWords t
   let (head, tail) := encode_ht t v headSize [] []
   head ++ tail
+
+def test_array_ty : Ty := Ty.arr (Ty.arr Ty.word)
+
+def test_array_val : Value test_array_ty := [[0, 1], [2, 3, 4]]
+
+#eval encode test_array_ty test_array_val
 
 end AbiModel

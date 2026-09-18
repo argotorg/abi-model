@@ -2,7 +2,7 @@ import AbiModel.Ty
 
 namespace AbiModel
 
-def Value : Ty → Type
+@[reducible] def Value : Ty → Type
   | .unit => Unit
   | .word => Word
   | .bool => Bool
