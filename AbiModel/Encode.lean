@@ -76,4 +76,18 @@ end
 /-- Full canonical encoding: head placed first, then the tail. -/
 def encode (t : Ty) (v : Value t) : Wire := encHead t v (headWords t) ++ encTail t v
 
+def test1_dyn_sum_ty : Ty := Ty.sum (Ty.array (Ty.array Ty.word)) (Ty.array Ty.word)
+def test1_dyn_sum_val : Value test1_dyn_sum_ty := .inl [[natW 0, natW 4], [natW 1, natW 5], [natW 2, natW 6]]
+#eval encode test1_dyn_sum_ty test1_dyn_sum_val
+
+-- expected output for the encoding of the dynamic sum type test case
+-- [2 (offset), 0 (inl), 4 (offset to outer array), 3 (length of outer array), 8 (offset to first inner array), 11 (offset to second inner array), 14 (offset to third inner array), 2 (length of first inner array), 0, 4, 2 (length of second inner array), 1, 5, 2 (length of third inner array), 2, 6]
+-- [2 , 0, 4, 3, 8, 11, 14, 2, 0, 4, 2, 1, 5, 2, 2, 6]
+
+-- similar problem with the offsets for dynamic tuples, dynamic sums and arrays.
+
+def test2_array_ty : Ty := Ty.array (Ty.array Ty.word)
+def test2_array_val : Value test2_array_ty :=[[natW 0, natW 4, natW 8], [natW 1, natW 5], [natW 2, natW 6]]
+#eval encode test2_array_ty test2_array_val
+
 end AbiModel
