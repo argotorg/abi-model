@@ -28,6 +28,9 @@ tail (an array of dynamic elements gets an inner offset table, like the std
 `abiArrayGet`). Offsets are **word-indexed** here — the std's byte offset is
 `32 ×` this — which keeps the model functional and total without a byte-level
 memory. A static `sum` still writes `[tag | branch]` padded to the widest branch.
+A dynamic `sum` puts the same padded `[tag | branch head]` block in the tail,
+followed by the branch's tail; the branch's offsets are relative to the tag word,
+exactly as `ABIGeneric.sol`'s `encodeInto` (`newBase = tail`, branch at offset 32).
 The decoder is base-relative (it follows offsets) and **lenient** on the tag like
 the real one (`tag = 0 ⇒ inl`, any other ⇒ `inr`).
 

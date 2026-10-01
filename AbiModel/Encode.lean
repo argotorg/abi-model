@@ -23,6 +23,11 @@ std `ABIEncode.encodeInto` / `abi_encode` (`std/std.sol:1365,1458`) and
 at where its data begins in the shared tail (`tb`). A `pair` lays its components
 inline in the head and threads the tail cursor; a dynamic `sum`/`tup`/`array`
 places one offset word and puts its `[..]` block in the tail.
+
+A dynamic sum's tail block mirrors `ABIGeneric.sol`'s `encodeInto`: it is
+`[tag | branch head | padding | branch tail]`, where the branch head is padded to
+the widest branch (`max (headWords a) (headWords b)`) and the branch's own offsets
+are relative to the *tag word* (the std's `newBase = tail`, branch at offset 32).
 -/
 mutual
 
@@ -50,8 +55,12 @@ def encTail : (t : Ty) → Value t → Wire
   | .sum a b, v =>
       if isStatic a && isStatic b then []
       else match v with
-        | .inl x => (0 : Word) :: (encHead a x (headWords a) ++ encTail a x)
-        | .inr y => (1 : Word) :: (encHead b y (headWords b) ++ encTail b y)
+        | .inl x =>
+            (0 : Word) :: (encHead a x (1 + max (headWords a) (headWords b))
+              ++ List.replicate (padL a b) (0 : Word) ++ encTail a x)
+        | .inr y =>
+            (1 : Word) :: (encHead b y (1 + max (headWords a) (headWords b))
+              ++ List.replicate (padR a b) (0 : Word) ++ encTail b y)
   | .tup a, v => if isStatic a then [] else (encHead a v (headWords a) ++ encTail a v)
   | .array a, xs =>
       natW xs.length :: (encHeadSeq a xs (xs.length * headWords a) ++ encTailSeq a xs)
@@ -80,12 +89,15 @@ def test1_dyn_sum_ty : Ty := Ty.sum (Ty.array (Ty.array Ty.word)) (Ty.array Ty.w
 def test1_dyn_sum_val : Value test1_dyn_sum_ty := .inl [[natW 0, natW 4], [natW 1, natW 5], [natW 2, natW 6]]
 #eval encode test1_dyn_sum_ty test1_dyn_sum_val
 
--- expected output for the encoding of the dynamic sum type test case
--- [2 (offset), 0 (inl), 4 (offset to outer array), 3 (length of outer array), 8 (offset to first inner array), 11 (offset to second inner array), 14 (offset to third inner array), 2 (length of first inner array), 0, 4, 2 (length of second inner array), 1, 5, 2 (length of third inner array), 2, 6]
--- [2 , 0, 4, 3, 8, 11, 14, 2, 0, 4, 2, 1, 5, 2, 2, 6]
+-- expected output (std `abi_encode`, word-indexed; offsets are 0-based and
+-- relative to the enclosing region's base, never absolute):
+-- [1 (offset to sum body, rel. to start), 0 (inl), 2 (offset to outer array, rel. to tag word),
+--  3 (length of outer array), 3, 6, 9 (offsets to inner arrays, rel. to the element region),
+--  2 (length of first inner array), 0, 4, 2 (length of second inner array), 1, 5,
+--  2 (length of third inner array), 2, 6]
+-- [1, 0, 2, 3, 3, 6, 9, 2, 0, 4, 2, 1, 5, 2, 2, 6]
 
--- similar problem with the offsets for dynamic tuples, dynamic sums and arrays.
-
+-- expected output: [1, 3, 3, 7, 10, 3, 0, 4, 8, 2, 1, 5, 2, 2, 6]
 def test2_array_ty : Ty := Ty.array (Ty.array Ty.word)
 def test2_array_val : Value test2_array_ty :=[[natW 0, natW 4, natW 8], [natW 1, natW 5], [natW 2, natW 6]]
 #eval encode test2_array_ty test2_array_val

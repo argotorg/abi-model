@@ -28,8 +28,9 @@ def decAt : (t : Ty) → Wire → Nat → Nat → Value t
         else Sum.inr (decAt b W base (ho + 1))
       else
         let o := (rd W (base + ho)).toNat
-        if rd W (base + o) = 0 then Sum.inl (decAt a W (base + o + 1) 0)
-        else Sum.inr (decAt b W (base + o + 1) 0)
+        -- rebase at the tag word (the std's `sumRdr`); the branch head is at 1
+        if rd W (base + o) = 0 then Sum.inl (decAt a W (base + o) 1)
+        else Sum.inr (decAt b W (base + o) 1)
   | .tup a, W, base, ho =>
       if isStatic a then decAt a W base ho
       else decAt a W (base + (rd W (base + ho)).toNat) 0

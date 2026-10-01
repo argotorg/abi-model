@@ -38,4 +38,31 @@ def rt (t : Ty) (v : Value t) : Bool := encode t (decode t (encode t v)) == enco
 #guard rt (.array (.sum .word (.array .word)))
           ([Sum.inl 1, Sum.inr [2,3]] : List (Word ⊕ List Word))
 
+/-- Exact-wire check against the std `abi_encode` layout (word-indexed). -/
+def wireIs (t : Ty) (v : Value t) (expected : List Nat) : Bool :=
+  (encode t v).map (·.toNat) == expected
+
+-- dynamic sum: branch offsets are relative to the tag word (std `newBase = tail`)
+#guard wireIs test1_dyn_sum_ty test1_dyn_sum_val [1, 0, 2, 3, 3, 6, 9, 2, 0, 4, 2, 1, 5, 2, 2, 6]
+
+-- array of arrays: inner offsets relative to the element region
+#guard wireIs test2_array_ty test2_array_val [1, 3, 3, 7, 10, 3, 0, 4, 8, 2, 1, 5, 2, 2, 6]
+
+-- dynamic sum with branches of different head widths: the branch head is padded
+-- to `max` of both (std `innerHead = 32 + max(headSize f, headSize g)`)
+#guard wireIs (.sum (.pair .word (.array .word)) (.array .word))
+              (Sum.inr [7] : (Word × List Word) ⊕ List Word) [1, 1, 3, 0, 1, 7]
+#guard wireIs (.sum (.pair .word (.array .word)) (.array .word))
+              (Sum.inl (5, [7]) : (Word × List Word) ⊕ List Word) [1, 0, 5, 3, 1, 7]
+#guard rt (.sum (.pair .word (.array .word)) (.array .word))
+          (Sum.inr [7] : (Word × List Word) ⊕ List Word)
+#guard rt (.sum (.pair .word (.array .word)) (.array .word))
+          (Sum.inl (5, [7]) : (Word × List Word) ⊕ List Word)
+
+-- dynamic sum nested in an array and in a pair (rebasing composes)
+#guard rt (.array (.sum (.pair .word (.array .word)) (.array .word)))
+          ([Sum.inr [1, 2], Sum.inl (3, [4])] : List ((Word × List Word) ⊕ List Word))
+#guard rt (.pair .word (.sum .word (.array .word)))
+          ((9, Sum.inr [1, 2]) : Word × (Word ⊕ List Word))
+
 end AbiModel
