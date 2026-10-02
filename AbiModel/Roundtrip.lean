@@ -198,5 +198,29 @@ theorem decodeAll_encode_static (t : Ty) (hst : isStatic t = true) (v : Value t)
     decodeAll t (encode t v) = some v := by
   simp [decodeAll, decode_encode_static t hst v]
 
-end AbiModel
+theorem decode_encode_dynamic (t : Ty) (hdyn : isStatic t = false) (v : Value t) :
+  decode t (encode t v) = v := by
+  induction t with
+  | unit => exact absurd hdyn (by decide)
+  | word => exact absurd hdyn (by decide)
+  | bool => exact absurd hdyn (by decide)
+  | pair a b ia ib =>
+      -- proof for pair goes here
+      sorry
+  | sum a b ia ib =>
+      -- proof for sum goes here
+      sorry
+  | tup a ia =>
+      have hdyna : isStatic a = false := by simpa only [isStatic] using hdyn
+      simp only [decode, decAt]
+      rw [hdyna]
+      simp [Value] at v
+      simp
+      have hfoo := ia hdyna v
+      sorry
+      -- proof for tuple goes here
+  | array a ia =>
+      -- proof for array goes here
+      sorry
 
+end AbiModel
