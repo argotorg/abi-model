@@ -97,7 +97,7 @@ theorem decAt_static : ∀ (t : Ty), isStatic t = true →
       W.drop (base + ho) = encHead t v (headWords t) ++ suf → decAt t W base ho = v := by
   intro t
   induction t with
-  | unit => intro _ v W base ho suf _; simp only [decAt]; cases v; rfl
+  | unit => intro _ v W base ho suf _; simp only [decAt]
   | word =>
       intro _ v W base ho suf hp
       simp only [decAt, rd_eq_drop, hp, encHead]; rfl
@@ -130,7 +130,6 @@ theorem decAt_static : ∀ (t : Ty), isStatic t = true →
         rwa [hla, show (base + ho) + headWords a = base + (ho + headWords a) from by omega] at hd
       have hb := ihb hsb v.2 W base (ho + headWords a) suf hpb
       simp only [decAt]; rw [ha, hb]
-      rfl
   | sum a b iha ihb =>
       intro hst v W base ho suf hp
       have hstb : (isStatic a && isStatic b) = true := by simpa only [isStatic] using hst
@@ -198,6 +197,32 @@ theorem decodeAll_encode_static (t : Ty) (hst : isStatic t = true) (v : Value t)
     decodeAll t (encode t v) = some v := by
   simp [decodeAll, decode_encode_static t hst v]
 
+/-- Reads are base-relative: prepending `pre` and shifting the base by its
+    length does not change the read. -/
+theorem rd_shift (pre W : Wire) (k : Nat) : rd (pre ++ W) (pre.length + k) = rd W k := by
+  simp [rd, List.getD_eq_getElem?_getD, List.getElem?_append_right]
+
+/-- The decoder is base-relative: prepending `pre` to the wire and shifting the
+    base by its length decodes the same value. -/
+theorem decAt_shift : ∀ (t : Ty) (pre W : Wire) (base ho : Nat),
+    decAt t (pre ++ W) (pre.length + base) ho = decAt t W base ho := by
+  intro t
+  induction t with
+  | unit => intros; rfl
+  | word => intro pre W base ho; simp only [decAt, Nat.add_assoc, rd_shift]
+  | bool => intro pre W base ho; simp only [decAt, Nat.add_assoc, rd_shift]
+  | pair a b iha ihb => intro pre W base ho; simp only [decAt, iha, ihb]
+  | sum a b iha ihb => intro pre W base ho; simp only [decAt, Nat.add_assoc, rd_shift, iha, ihb]
+  | tup a iha => intro pre W base ho; simp only [decAt, Nat.add_assoc, rd_shift, iha]
+  | array a iha =>
+      have hseq : ∀ (pre W : Wire) (region n i : Nat),
+          decSeq a (pre ++ W) (pre.length + region) n i = decSeq a W region n i := by
+        intro pre W region n
+        induction n with
+        | zero => intro i; simp only [decSeq]
+        | succ k ih => intro i; simp only [decSeq, iha, ih]
+      intro pre W base ho; simp only [decAt, Nat.add_assoc, rd_shift, hseq]
+
 theorem decode_encode_dynamic (t : Ty) (hdyn : isStatic t = false) (v : Value t) :
   decode t (encode t v) = v := by
   induction t with
@@ -212,13 +237,19 @@ theorem decode_encode_dynamic (t : Ty) (hdyn : isStatic t = false) (v : Value t)
       sorry
   | tup a ia =>
       have hdyna : isStatic a = false := by simpa only [isStatic] using hdyn
-      simp only [decode, decAt]
-      rw [hdyna]
-      simp [Value] at v
-      simp
-      have hfoo := ia hdyna v
-      sorry
-      -- proof for tuple goes here
+      -- a dynamic tuple is one offset word (pointing just past itself) followed
+      -- by the encoding of its contents
+      have hW : encode (Ty.tup a) v = [natW 1] ++ encode a v := by
+        simp [encode, encHead, encTail, headWords, hdyna]
+      have h0 : (rd (encode (Ty.tup a) v) 0).toNat = 1 := by
+        rw [hW]; simp [rd, natW]
+      show decAt (Ty.tup a) (encode (Ty.tup a) v) 0 0 = v
+      simp only [decAt, hdyna, Bool.false_eq_true, if_false, Nat.zero_add, h0]
+      rw [hW]
+      have hs := decAt_shift a [natW 1] (encode a v) 0 0
+      simp only [List.length_singleton, Nat.add_zero] at hs
+      rw [hs]
+      exact ia hdyna v
   | array a ia =>
       -- proof for array goes here
       sorry
