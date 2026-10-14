@@ -11,10 +11,12 @@ The algebraic core of the ABI type universe, plus **dynamic arrays**, as the doc
 describes it:
 
 - products are right-nested `pair`s;
-- **sums are binary** `sum f g` — the uniform `inl`/`inr` encoding every
-  algebraic data type shares — with a tag word `0 = inl`, `1 = inr` (this is the
-  key change from the earlier n-ary/hashed-tag model; it matches
-  `ABIGeneric.solc`);
+- the primitive **binary sum** `sum f g` (`ABIGeneric.sol`'s `sum<f, g>`), with a
+  tag word `0 = inl`, `1 = inr` at every nesting level;
+- a derived **multi-constructor enum** `enum n₀ t₀ cs` (`DeriveGeneric.hs`), with
+  the same static/dynamic layout as its SOP rep `sum<t₀, sum<t₁, …>>` but a
+  *single* tag word `keccak256("Name(argSigs)")` (computed in Lean:
+  `AbiModel/Keccak.lean`, signatures in `AbiModel/Sig.lean`);
 - `tup` is the ABITuple grouping wrapper;
 - **`array a` is a dynamic array** of `a` (element type may itself be dynamic);
 - atoms `word`, `bool`, and `unit`.

@@ -11,8 +11,9 @@ Base-relative canonical decoder, aligned with the std `ABIDecode` / word readers
 (`std/std.sol:1524,1679,1757`). `decAt t W base ho` reads the value of type `t`
 whose head sits at absolute index `base + ho` in `W`, following offset words into
 the shared tail exactly as `abiArrayGet` / the dynamic-sum decoder do. Reads are
-total (`rd`), so the decoder is total; it stays *lenient* on tags (any nonzero tag
-word decodes as the right injection / a truthy bool), matching the real decoder.
+total (`rd`), so the decoder is total; it stays *lenient* on tags (any nonzero `sum` tag
+word decodes as the right injection, an unknown `enum` tag as its last
+constructor, a nonzero bool word as `true`), matching the real decoder.
 -/
 mutual
 
@@ -38,7 +39,28 @@ def decAt : (t : Ty) → Wire → Nat → Nat → Value t
       let o := (rd W (base + ho)).toNat
       let len := (rd W (base + o)).toNat
       decSeq a W (base + o + 1) len 0
-  termination_by t => (sizeOf t, 0)
+  | .enum n t cs, W, base, ho =>
+      if isStatic t && isStaticC cs then decArm n t cs W base (ho + 1) (rd W (base + ho))
+      else
+        let o := (rd W (base + ho)).toNat
+        -- rebase at the tag word (the std's `abiSumReader`); the payload head is at 1
+        decArm n t cs W (base + o) 1 (rd W (base + o))
+  termination_by t => (sizeOf t, 1, 0)
+
+/-- Dispatch on an enum's tag word, decoding the selected constructor's payload
+    head at `base + ho`. Like the derived solcore decoder
+    (`DeriveGeneric.buildABIDecodeSum`), each constructor but the last is matched
+    by its `ctorTag` in order and the last is the default (lenient on unknown tags). -/
+def decArm : (n : String) → (t : Ty) → (cs : Ctors) → Wire → Nat → Nat → Word →
+    Value t ⊕ ValueC cs
+  | n, t, .cons m u cs, W, base, ho, tag =>
+      if tag = ctorTag n t then Sum.inl (decAt t W base ho)
+      else Sum.inr (decArm m u cs W base ho tag)
+  | n, t, .last _ u, W, base, ho, tag =>
+      if tag = ctorTag n t then Sum.inl (decAt t W base ho)
+      else Sum.inr (decAt u W base ho)
+  termination_by _ t cs => (sizeOf t + sizeOf cs, 0, 0)
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
 
 /-- Decode `n` array elements from an element region starting at `region`.
     Element `i`'s head sits at `region + i * headWords a` (inline for a static
@@ -47,7 +69,7 @@ def decAt : (t : Ty) → Wire → Nat → Nat → Value t
 def decSeq : (a : Ty) → Wire → Nat → Nat → Nat → List (Value a)
   | _, _, _, 0, _ => []
   | a, W, region, k + 1, i => decAt a W region (i * headWords a) :: decSeq a W region k (i + 1)
-  termination_by a _ _ n => (sizeOf a, n)
+  termination_by a _ _ n => (sizeOf a, 2, n)
 
 end
 
