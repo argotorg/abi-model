@@ -36,6 +36,11 @@ end
 def ctorTag (name : String) (t : Ty) : Word :=
   keccakWord (name ++ "(" ++ sigStr t ++ ")")
 
+/-- The wire tags of the remaining constructors of an enum, in order. -/
+def tagsC : Ctors → List Word
+  | .last m u => [ctorTag m u]
+  | .cons m u cs => ctorTag m u :: tagsC cs
+
 -- tags from solcore's `test/examples/dispatch/abi_sum_roundtrip.json`
 #guard ctorTag "L" .word = 0x9579c5ddf61e49d0bf336001c25c13f5689ee1abeee1a378b6bef308961641ec#256
 #guard ctorTag "X" .word = 0x337229d96e709f076d800bbc51bd1a1c2d4bef08e1bc014b6824ac7256f23c43#256

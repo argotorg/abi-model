@@ -43,12 +43,29 @@ fragment** — decoding a canonical encoding recovers the value — in the new
 base-relative model:
 
 ```lean
-theorem decode_encode_static (t : Ty) (hst : isStatic t = true) (v : Value t) :
-    decode t (encode t v) = v
+theorem decode_encode_static (t : Ty) (hst : isStatic t = true) (v : Value t)
+    (hfit : Fits t v) : decode t (encode t v) = v
 
-theorem decodeAll_encode_static (t : Ty) (hst : isStatic t = true) (v : Value t) :
-    decodeAll t (encode t v) = some v
+theorem decodeAll_encode_static (t : Ty) (hst : isStatic t = true) (v : Value t)
+    (hfit : Fits t v) : decodeAll t (encode t v) = some v
 ```
+
+`Fits t v` collects the side conditions: array lengths fit in a word, and every
+enum on the value's path has pairwise-distinct constructor tags (in solcore,
+distinct constructor names make a violation a keccak collision).
+
+The general `decode_encode_fits` (and `decode_encode_dynamic`) additionally assume
+`(encode t v).length < 2 ^ 256`. Dynamic nodes write their tail position as an
+offset *word*, i.e. modulo `2^256`, and the decoder reads it back with `.toNat`; the
+round trip holds only if no offset wraps. Every offset points inside the wire, so
+bounding the wire's length bounds all of them. Without it, e.g. a
+`pair (array word) (array word)` whose first array has more than `2^256` elements
+writes a wrapped offset for the second array, which then decodes from the wrong
+place. The static theorems need no such bound because static types write no
+offsets. The array-length condition in `Fits` is separate: an `array unit` of
+length `2^256` has a tiny encoding (zero-width elements) but its length word wraps
+to `0`. Neither condition excludes anything real: no calldata or memory comes near
+`2^256` bytes.
 
 alongside the structural lemmas the dynamic machinery rests on (`encHead_length`,
 `encTail_nil_of_static`, `encHead_static_tb_irrel`). The converse (a _section_
