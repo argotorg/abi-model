@@ -36,25 +36,47 @@ exactly as `ABIGeneric.sol`'s `encodeInto` (`newBase = tail`, branch at offset 3
 The decoder is base-relative (it follows offsets) and **lenient** on the tag like
 the real one (`tag = 0 ⇒ inl`, any other ⇒ `inr`).
 
-## The theorem and the checks
+## The theorems and the checks
 
-`AbiModel/Roundtrip.lean` proves the retraction law (T1) for the **static
-fragment** — decoding a canonical encoding recovers the value — in the new
+`AbiModel/Roundtrip.lean` proves the retraction law (T1) — decoding a canonical
+encoding recovers the value — for **every type**, static and dynamic (arrays,
+dynamic sums, tuples and enums, with the offset indirection), in the
 base-relative model:
 
 ```lean
+-- static types: no offsets, so no length bound
 theorem decode_encode_static (t : Ty) (hst : isStatic t = true) (v : Value t)
     (hfit : Fits t v) : decode t (encode t v) = v
 
 theorem decodeAll_encode_static (t : Ty) (hst : isStatic t = true) (v : Value t)
     (hfit : Fits t v) : decodeAll t (encode t v) = some v
+
+-- all types
+theorem decode_encode_fits (t : Ty) (v : Value t) (hfit : Fits t v)
+    (hlen : (encode t v).length < 2 ^ 256) : decode t (encode t v) = v
+
+-- dynamic types (the case the offset machinery is for)
+theorem decode_encode_dynamic : ∀ (t : Ty), isStatic t = false → ∀ (v : Value t),
+    Fits t v → (encode t v).length < 2 ^ 256 → decode t (encode t v) = v
 ```
 
-`Fits t v` collects the side conditions: array lengths fit in a word, and every
-enum on the value's path has pairwise-distinct constructor tags (in solcore,
-distinct constructor names make a violation a keccak collision).
+The general theorem rests on the placement lemma `decAt_place`: if a value's head
+(written with tail cursor `tb`) sits at `base + ho` in the wire and its tail at
+`base + tb`, the base-relative decoder recovers the value. That lemma follows each
+offset word to the tail block it points at. Its static counterpart `decAt_static`
+needs no tail. Both rest on the structural lemmas `encHead_length`,
+`encTail_nil_of_static`, `encHead_static_tb_irrel` and `decAt_shift` (decoding is
+invariant under prepending a prefix and shifting the base). The enum cases go
+through the per-constructor `arm*_of` lemmas.
 
-The general `decode_encode_fits` (and `decode_encode_dynamic`) additionally assume
+### Side conditions
+
+`Fits t v` collects the value-level side conditions: array lengths fit in a word,
+and every enum on the value's path has pairwise-distinct constructor tags (in
+solcore, distinct constructor names make a violation a keccak collision; without
+it, e.g. `enum "A" word (last "A" word)` decodes `inr 5` as `inl 5`).
+
+The general and dynamic theorems additionally assume
 `(encode t v).length < 2 ^ 256`. Dynamic nodes write their tail position as an
 offset *word*, i.e. modulo `2^256`, and the decoder reads it back with `.toNat`; the
 round trip holds only if no offset wraps. Every offset points inside the wire, so
@@ -67,31 +89,33 @@ length `2^256` has a tiny encoding (zero-width elements) but its length word wra
 to `0`. Neither condition excludes anything real: no calldata or memory comes near
 `2^256` bytes.
 
-alongside the structural lemmas the dynamic machinery rests on (`encHead_length`,
-`encTail_nil_of_static`, `encHead_static_tb_irrel`). The converse (a _section_
-`encode ∘ decode = id`) is **false** for the lenient decoder — a non-canonical tag
-decodes as `inr` and re-encodes to `1`, so the model is deliberately non-injective,
-matching the real decoder.
+The converse (a _section_ `encode ∘ decode = id`) is **false** for the lenient
+decoder — a non-canonical tag decodes as `inr` (or, for an enum, as the last
+constructor) and re-encodes canonically, so the model is deliberately
+non-injective, matching the real decoder.
 
-**Dynamic arrays** (including arrays of arrays and dynamic sums, with the offset
-indirection) are validated by a **machine-checked round-trip battery** in
-`AbiModel/Sanity.lean`: each `#guard` fails at elaboration unless the concrete
-round-trip holds, so it is a real check with no `sorry`. Extending the universal
-`decode_encode` proof across the offset indirection (and its `2^256` bounds) is the
-remaining step; nothing is admitted in the meantime — the whole project builds with
-**no `sorry`**.
+### Concrete checks
+
+`AbiModel/Sanity.lean` complements the theorems with a battery of `#guard`s, each
+of which fails at elaboration unless it holds: round trips on concrete values, and
+exact wire layouts, including the wire of solcore's `rtS2` test and the enum tags
+and selector from solcore's test expectations (`AbiModel/Sig.lean`). The Keccak-256
+implementation is checked against standard and OpenSSL test vectors
+(`AbiModel/Keccak.lean`). The whole project builds with **no `sorry`**.
 
 ## Layout
 
 | file                      | contents                                                  |
 | ------------------------- | --------------------------------------------------------- |
 | `AbiModel/Word.lean`      | `Word := BitVec 256`, `Wire := List Word`                 |
-| `AbiModel/Ty.lean`        | `Ty` (+ `array`), `isStatic`, `headWords`                 |
+| `AbiModel/Ty.lean`        | `Ty`/`Ctors` (+ `array`, `enum`), `isStatic`, `headWords` |
 | `AbiModel/Val.lean`       | `Value : Ty → Type` (dependent; `array a ↦ List`)         |
+| `AbiModel/Keccak.lean`    | pure-Lean Keccak-256 (`keccakWord`) + test vectors        |
+| `AbiModel/Sig.lean`       | ABI signature strings (`sigStr`) and enum tags (`ctorTag`) |
 | `AbiModel/Encode.lean`    | head/tail `encode` with word offsets (`encHead`/`encTail`) |
 | `AbiModel/Decode.lean`    | base-relative `decode` following offsets (`decAt`/`decSeq`)|
-| `AbiModel/Roundtrip.lean` | `decode_encode_static` (T1) + structural lemmas           |
-| `AbiModel/Sanity.lean`    | `#guard` round-trip battery for dynamic arrays            |
+| `AbiModel/Roundtrip.lean` | round-trip theorems (T1), static and dynamic, + lemmas    |
+| `AbiModel/Sanity.lean`    | `#guard` round-trip and exact-wire battery                |
 | `Main.lean`               | a wire-level round-trip sanity check                      |
 
 ## Build & run
