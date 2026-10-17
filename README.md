@@ -76,6 +76,10 @@ builds with **no `sorry`**.
 | `AbiModel/FFI/Keccak.lean` | `keccak256` via FFI (+ `keccakWord`, `selector`)            |
 | `c/ffi.c`, `c/sha3/`       | C glue + SHA3IUF (Keccak)                                   |
 | `AbiTest/Keccak.lean`      | keccak `#guard` known-answer tests (`precompileModules`)    |
+| `AbiModel/EncodeAnn.lean`  | byte-offset encoder with word roles (`encodeBytes`)         |
+| `AbiDiff/`                 | differential test against Solcore (`lake exe abidiff`)      |
+| `scripts/`                 | `diff-solcore.sh` (driver), `run-solcore.sh` (compile+run)  |
+| `flake.nix`                | pins Solcore and its tools (sol-core, testrunner, evmone)   |
 | `Main.lean`                | a wire-level round-trip sanity check                        |
 
 ## keccak256 (FFI)
@@ -88,6 +92,36 @@ see it as an uninterpreted function. The interpreter cannot call it, so
 `precompileModules := true`: the `AbiTest` library (`AbiTest/Keccak.lean`) holds
 its known-answer `#guard`s, checked against `openssl dgst -keccak-256`, and is
 part of `lake build`.
+
+## Differential testing against Solcore
+
+`AbiDiff` checks the model against what Solcore's std library actually produces
+on the EVM. For each case (a model type and a value of it) it generates a
+Solcore method returning `abi_encode(v)` and a test file whose expected return
+data is the model's prediction (`encodeBytes`, offsets in bytes; proved equal to
+`encode` at unit scale by `encodeAnn_one`). The contracts are compiled with
+`sol-core`, `yule` and `solc`, run with Solcore's `testrunner` on evmone, and
+the results are written to `out/report.md`. Diverging cases come with a
+word-by-word table (each word labelled offset / tag / length / data / padding)
+and a regression `.sol` + `.json` pair in `out/regressions/`.
+
+Solcore comes from the flake input `solcore` (pinned in `flake.lock`), so
+nothing depends on a local checkout:
+
+```sh
+nix run .#diff                                # the fixed cases (AbiDiff/Cases.lean)
+nix run .#diff -- --random --seed 7 --n 100   # Plausible-generated cases, shrunk on failure
+nix run .#diff --override-input solcore github:argotorg/solcore   # current Solcore main
+nix run .#diff --override-input solcore path:../solcore           # a local Solcore checkout
+nix flake update solcore                      # move the pin to the current main
+```
+
+Random cases are generated type-first from the fragment the std can encode
+(`AbiDiff.supported`), so the generated Solcore is well typed by construction.
+Each case ends as **agree**, **diverge** (shrunk with Plausible's `Shrinkable`,
+batch by batch) or **compile-fail** (reported separately; a batch that does not
+compile is bisected). Inside `nix develop` the scripts can also be run directly:
+`scripts/diff-solcore.sh --help`.
 
 ## Build & run
 
