@@ -37,7 +37,7 @@ where
     | none => .error s!"not a number: {v}"
 
 def chunks (k : Nat) (xs : List α) : List (List α) :=
-  if h : k = 0 ∨ xs = [] then [xs].filter (!·.isEmpty)
+  if _h : k = 0 ∨ xs = [] then [xs].filter (!·.isEmpty)
   else xs.take k :: chunks k (xs.drop k)
 termination_by xs.length
 decreasing_by simp_wf; cases xs <;> simp_all; omega
