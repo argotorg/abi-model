@@ -1,4 +1,5 @@
 import AbiModel.Decode
+import AbiModel.EncodeAnn
 
 namespace AbiModel
 
@@ -64,5 +65,22 @@ def wireIs (t : Ty) (v : Value t) (expected : List Nat) : Bool :=
           ([Sum.inr [1, 2], Sum.inl (3, [4])] : List ((Word × List Word) ⊕ List Word))
 #guard rt (.pair .word (.sum .word (.array .word)))
           ((9, Sum.inr [1, 2]) : Word × (Word ⊕ List Word))
+
+end AbiModel
+
+namespace AbiModel
+
+/-- Byte-level wire (offsets × 32), as `abi_encode` returns it. -/
+def bytesIs (t : Ty) (v : Value t) (expected : List Nat) : Bool :=
+  (encodeBytes t v).map (·.toNat) == expected
+
+-- static product: same as `encPoint(3,4)` in solcore's abi_encode_adt.json
+#guard bytesIs (.pair .word .word) ((3, 4) : Word × Word) [3, 4]
+-- offsets become byte offsets, lengths stay counts
+#guard bytesIs (.pair .word (.array .word)) ((9, [5, 6]) : Word × List Word) [9, 0x40, 2, 5, 6]
+#guard bytesIs (.pair .word (.tup (.array .word))) ((9, [5, 6]) : Word × List Word)
+  [9, 0x40, 0x20, 2, 5, 6]
+#guard bytesIs test1_dyn_sum_ty test1_dyn_sum_val
+  [0x20, 0, 0x40, 3, 0x60, 0xc0, 0x120, 2, 0, 4, 2, 1, 5, 2, 2, 6]
 
 end AbiModel

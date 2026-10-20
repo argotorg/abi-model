@@ -20,5 +20,6 @@ def main : IO UInt32 := do
   IO.println "abi-model (binary inl/inr sums; dynamic arrays via head/tail word offsets)"
   IO.println "  static round-trip: theorem AbiModel.decodeAll_encode_static (no sorry)"
   IO.println "  dynamic arrays: machine-checked #guard battery in AbiModel/Sanity.lean"
+  IO.println "  keccak256 (FFI): #guard known-answer tests in AbiTest/Keccak.lean"
   IO.println s!"  sample re-encodes after decode match wire : {ok}"
   return (bif ok then 0 else 1)
