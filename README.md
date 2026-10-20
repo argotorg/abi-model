@@ -23,18 +23,18 @@ describes it:
 
 Encoding is **head/tail canonical**, aligned with the std `ABIEncode.encodeInto`
 (`std/std.sol:1365,1458`) and `doc/src/core/abi-encoding-decoding.md`:
-`encode t v = encHead t v (headWords t) ++ encTail t v`. A static value is written
-inline in the head; a **dynamic node** (array, dynamic sum/tup) writes a single
-**offset word** into the head pointing at its `[length | ...]` block in the shared
-tail (an array of dynamic elements gets an inner offset table, like the std
-`abiArrayGet`). Offsets are **word-indexed** here — the std's byte offset is
-`32 ×` this — which keeps the model functional and total without a byte-level
-memory. A static `sum` still writes `[tag | branch]` padded to the widest branch.
-A dynamic `sum` puts the same padded `[tag | branch head]` block in the tail,
-followed by the branch's tail; the branch's offsets are relative to the tag word,
-exactly as `ABIGeneric.sol`'s `encodeInto` (`newBase = tail`, branch at offset 32).
-The decoder is base-relative (it follows offsets) and **lenient** on the tag like
-the real one (`tag = 0 ⇒ inl`, any other ⇒ `inr`).
+`encode t v = encHead t v (headWords t) ++ encTail t v`. A static value is
+written inline in the head; a **dynamic node** (array, dynamic sum/tup) writes a
+single **offset word** into the head pointing at its `[length | ...]` block in
+the shared tail (an array of dynamic elements gets an inner offset table, like
+the std `abiArrayGet`). Offsets are **word-indexed** here — the std's byte
+offset is `32 ×` this — which keeps the model functional and total without a
+byte-level memory. A static `sum` still writes `[tag | branch]` padded to the
+widest branch. A dynamic `sum` puts the same padded `[tag | branch head]` block
+in the tail, followed by the branch's tail; the branch's offsets are relative to
+the tag word, exactly as `ABIGeneric.sol`'s `encodeInto` (`newBase = tail`,
+branch at offset 32). The decoder is base-relative (it follows offsets) and
+**lenient** on the tag like the real one (`tag = 0 ⇒ inl`, any other ⇒ `inr`).
 
 ## The theorems and the checks
 
@@ -116,7 +116,23 @@ implementation is checked against standard and OpenSSL test vectors
 | `AbiModel/Decode.lean`    | base-relative `decode` following offsets (`decAt`/`decSeq`)|
 | `AbiModel/Roundtrip.lean` | round-trip theorems (T1), static and dynamic, + lemmas    |
 | `AbiModel/Sanity.lean`    | `#guard` round-trip and exact-wire battery                |
+| `AbiModel/FFI/Keccak.lean` | `keccak256` via FFI (+ `keccakWord`, `selector`)            |
+| `c/ffi.c`, `c/sha3/`       | C glue + SHA3IUF (Keccak)                                   |
+| `AbiTest/Keccak.lean`      | keccak `#guard` known-answer tests (`precompileModules`)    |
 | `Main.lean`               | a wire-level round-trip sanity check                      |
+                     |
+
+## keccak256 (FFI)
+
+`AbiModel.FFI.keccak256 : ByteArray → ByteArray` is Ethereum's Keccak-256
+(original padding, as the `KECCAK256` opcode, not FIPS SHA3-256), implemented in
+C following the approach of EVMYulLean's `EvmYul/FFI`. It is `opaque`, so proofs
+see it as an uninterpreted function. The interpreter cannot call it, so
+`#eval`/`#guard` on it only work in modules built with
+`precompileModules := true`: the `AbiTest` library (`AbiTest/Keccak.lean`) holds
+its known-answer `#guard`s, checked against `openssl dgst -keccak-256`, and is
+part of `lake build`.
+
 
 ## Build & run
 
