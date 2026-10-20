@@ -1,12 +1,15 @@
 name: Differential test against Solcore
 
+# Automatic runs (push, pull_request and the weekly schedule) are disabled
+# until the fixes for the bugs found by the model are merged into solcore and
+# solcore-rs; until then the workflow only runs when triggered manually.
 on:
-  push:
-  pull_request:
   workflow_dispatch:
-  schedule:
-    # weekly, against the current Solcore main (see the `solcore` input below)
-    - cron: "0 6 * * 1"
+  # push:
+  # pull_request:
+  # schedule:
+  #   # weekly, against the current Solcore main (see the `solcore` input below)
+  #   - cron: "0 6 * * 1"
 
 jobs:
   diff:
