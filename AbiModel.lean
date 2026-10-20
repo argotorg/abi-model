@@ -1,9 +1,9 @@
 import AbiModel.Word
 import AbiModel.Ty
 import AbiModel.Val
-import AbiModel.Keccak
 import AbiModel.Sig
 import AbiModel.Encode
 import AbiModel.Decode
+import AbiModel.Check
 import AbiModel.Roundtrip
 import AbiModel.FFI.Keccak

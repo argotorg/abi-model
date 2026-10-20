@@ -1,5 +1,6 @@
 import AbiModel
-import AbiModel.Sanity  -- machine-checked #guard battery (round trips, exact wires, enum tags)
+import AbiModel.Sanity  -- machine-checked #guard battery (round trips, exact wires)
+import AbiTest          -- FFI keccak known answers and enum checks (native #guards)
 
 open AbiModel
 
@@ -25,11 +26,9 @@ def main : IO UInt32 := do
   IO.println "    decode_encode_static  : static types"
   IO.println "    decode_encode_fits    : all types, encoding length < 2^256"
   IO.println "    decode_encode_dynamic : dynamic types, encoding length < 2^256"
-  IO.println "  #guard battery (round trips, exact wires incl. solcore's rtS2): AbiModel/Sanity.lean"
-  IO.println "  keccak256 (pure Lean, OpenSSL test vectors): AbiModel/Keccak.lean"
-  IO.println "abi-model (binary inl/inr sums; dynamic arrays via head/tail word offsets)"
-  IO.println "  static round-trip: theorem AbiModel.decodeAll_encode_static (no sorry)"
-  IO.println "  dynamic arrays: machine-checked #guard battery in AbiModel/Sanity.lean"
-  IO.println "  keccak256 (FFI): #guard known-answer tests in AbiTest/Keccak.lean"
+  IO.println "    (enum tags via the opaque FFI keccak256; distinct tags assumed in `Fits`)"
+  IO.println "  #guard battery (round trips, exact wires): AbiModel/Sanity.lean"
+  IO.println "  enum #guards (solcore's tags and rtS2 wire): AbiTest/Enum.lean"
+  IO.println "  keccak256 (FFI, OpenSSL known answers): AbiTest/Keccak.lean"
   IO.println s!"  sample re-encodes after decode match wire : {ok}"
   return (bif ok then 0 else 1)

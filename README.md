@@ -15,8 +15,8 @@ describes it:
   tag word `0 = inl`, `1 = inr` at every nesting level;
 - a derived **multi-constructor enum** `enum n₀ t₀ cs` (`DeriveGeneric.hs`), with
   the same static/dynamic layout as its SOP rep `sum<t₀, sum<t₁, …>>` but a
-  *single* tag word `keccak256("Name(argSigs)")` (computed in Lean:
-  `AbiModel/Keccak.lean`, signatures in `AbiModel/Sig.lean`);
+  *single* tag word `keccak256("Name(argSigs)")` (computed by the FFI
+  `keccak256`, signatures in `AbiModel/Sig.lean`);
 - `tup` is the ABITuple grouping wrapper;
 - **`array a` is a dynamic array** of `a` (element type may itself be dynamic);
 - atoms `word`, `bool`, and `unit`.
@@ -72,8 +72,7 @@ through the per-constructor `arm*_of` lemmas.
 ### Side conditions
 
 `Fits t v` collects the value-level side conditions: array lengths fit in a word,
-and every enum on the value's path has pairwise-distinct constructor tags (in
-solcore, distinct constructor names make a violation a keccak collision; without
+and every enum on the value's path has pairwise-distinct constructor tags (without
 it, e.g. `enum "A" word (last "A" word)` decodes `inr 5` as `inl 5`).
 
 The general and dynamic theorems additionally assume
@@ -94,14 +93,39 @@ decoder — a non-canonical tag decodes as `inr` (or, for an enum, as the last
 constructor) and re-encodes canonically, so the model is deliberately
 non-injective, matching the real decoder.
 
+### Assumptions about keccak256
+
+Enum tags come from the FFI `keccak256` (see below), an `opaque` function the
+proofs cannot look inside. The theorems therefore hold for **any** function the
+opaque constant might denote. Their only assumption about the hash is the
+distinct-tags condition in `Fits`:
+
+- **Local collision-freeness.** Only the signature strings `"Name(argSigs)"` of
+  the constructors of the enums a value passes through must hash to distinct
+  words. This is not a global injectivity assumption about keccak, which would be
+  false (all byte strings map to 256 bits) and, as an axiom, inconsistent. It
+  holds when the signatures are distinct (solcore rejects duplicate constructor
+  names) and keccak has no collision among them, the standard cryptographic
+  assumption.
+- **No new axioms.** The assumption is a hypothesis of the theorems, not an
+  axiom: `#print axioms` lists only `propext`, `Classical.choice` and
+  `Quot.sound`.
+- **Checking it needs native code.** Because the function is opaque, the
+  condition can't be discharged by `decide`. For concrete enums it is checked by
+  evaluating the FFI natively, which trusts the C implementation (SHA3IUF) and
+  its agreement with EVM Keccak, as tested by the known answers in
+  `AbiTest/Keccak.lean`.
+
 ### Concrete checks
 
 `AbiModel/Sanity.lean` complements the theorems with a battery of `#guard`s, each
-of which fails at elaboration unless it holds: round trips on concrete values, and
-exact wire layouts, including the wire of solcore's `rtS2` test and the enum tags
-and selector from solcore's test expectations (`AbiModel/Sig.lean`). The Keccak-256
-implementation is checked against standard and OpenSSL test vectors
-(`AbiModel/Keccak.lean`). The whole project builds with **no `sorry`**.
+of which fails at elaboration unless it holds: round trips on concrete values and
+exact wire layouts. Checks involving enums evaluate tags, i.e. the FFI, so they
+live in the natively compiled `AbiTest` library: `AbiTest/Enum.lean` checks enum
+round trips and wires, including the wire of solcore's `rtS2` test and the tags
+and selector from solcore's test expectations. `AbiTest/Keccak.lean` checks the
+FFI `keccak256` against OpenSSL known answers. The whole project builds with
+**no `sorry`**.
 
 ## Layout
 
@@ -110,17 +134,17 @@ implementation is checked against standard and OpenSSL test vectors
 | `AbiModel/Word.lean`      | `Word := BitVec 256`, `Wire := List Word`                 |
 | `AbiModel/Ty.lean`        | `Ty`/`Ctors` (+ `array`, `enum`), `isStatic`, `headWords` |
 | `AbiModel/Val.lean`       | `Value : Ty → Type` (dependent; `array a ↦ List`)         |
-| `AbiModel/Keccak.lean`    | pure-Lean Keccak-256 (`keccakWord`) + test vectors        |
 | `AbiModel/Sig.lean`       | ABI signature strings (`sigStr`) and enum tags (`ctorTag`) |
 | `AbiModel/Encode.lean`    | head/tail `encode` with word offsets (`encHead`/`encTail`) |
 | `AbiModel/Decode.lean`    | base-relative `decode` following offsets (`decAt`/`decSeq`)|
+| `AbiModel/Check.lean`     | `rt`/`wireIs` Boolean checks used by the `#guard`s         |
 | `AbiModel/Roundtrip.lean` | round-trip theorems (T1), static and dynamic, + lemmas    |
 | `AbiModel/Sanity.lean`    | `#guard` round-trip and exact-wire battery                |
 | `AbiModel/FFI/Keccak.lean` | `keccak256` via FFI (+ `keccakWord`, `selector`)            |
 | `c/ffi.c`, `c/sha3/`       | C glue + SHA3IUF (Keccak)                                   |
 | `AbiTest/Keccak.lean`      | keccak `#guard` known-answer tests (`precompileModules`)    |
+| `AbiTest/Enum.lean`        | enum `#guard`s: tags, wires, round trips (`precompileModules`) |
 | `Main.lean`               | a wire-level round-trip sanity check                      |
-                     |
 
 ## keccak256 (FFI)
 
@@ -130,8 +154,10 @@ C following the approach of EVMYulLean's `EvmYul/FFI`. It is `opaque`, so proofs
 see it as an uninterpreted function. The interpreter cannot call it, so
 `#eval`/`#guard` on it only work in modules built with
 `precompileModules := true`: the `AbiTest` library (`AbiTest/Keccak.lean`) holds
-its known-answer `#guard`s, checked against `openssl dgst -keccak-256`, and is
-part of `lake build`.
+its known-answer `#guard`s, checked against `openssl dgst -keccak-256`, and the
+enum checks that evaluate tags (`AbiTest/Enum.lean`), and is part of `lake build`.
+`AbiTest` imports `AbiModel.Check` rather than `AbiModel.Sanity`: loading
+`Sanity`'s native code into the elaborator crashes it (exit 139).
 
 
 ## Build & run

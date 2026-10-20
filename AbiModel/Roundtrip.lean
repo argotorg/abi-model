@@ -7,6 +7,15 @@ namespace AbiModel
 (well-founded on `sizeOf`) instead of using `induction`; each lemma that has to
 look inside an enum has an `arm*` companion over the remaining constructors,
 mirroring the `arm*` helpers of the encoder.
+
+**Keccak.** Enum tags are `ctorTag n t = FFI.keccakString ("n(" ++ sigStr t ++ ")")`,
+where `FFI.keccak256` is an `opaque` `@[extern]` function implemented in C. Proofs
+cannot evaluate it and nothing here unfolds `ctorTag`: the theorems hold for
+*every* function `ByteArray → ByteArray` the opaque constant might denote. The only
+fact about tags they use is the distinct-tags hypothesis in `Fits`, which is an
+assumption about the hash's values on the signatures that actually occur (see
+`Fits`). No axiom is added: `#print axioms` lists only `propext`,
+`Classical.choice` and `Quot.sound`.
 -/
 
 /-! ### The selected enum constructor: head width and tag -/
@@ -195,8 +204,18 @@ mutual
 /-- Side conditions for the round trip: every array length fits in a word
     (without it, e.g. an `array unit` of length `2^256` encodes its length as `0`),
     and every enum on the value's path has pairwise-distinct constructor tags
-    (without it, e.g. `enum "A" word (last "A" word)` decodes `inr 5` as `inl 5`;
-    in solcore distinct constructor names make this a keccak collision). -/
+    (without it, e.g. `enum "A" word (last "A" word)` decodes `inr 5` as `inl 5`).
+
+    The tag condition is the round trip's assumption about `keccak256`. It is
+    *local*: only the signature strings `"Name(argSigs)"` of the constructors of
+    enums the value passes through must hash to distinct words, not keccak as a
+    whole (which cannot be injective: it maps all byte strings to 256 bits, so a
+    global injectivity axiom would be inconsistent). It holds when the
+    signatures are distinct (solcore rejects duplicate constructor names, and
+    distinct names give distinct signatures) and keccak has no collision among
+    them, the standard cryptographic assumption. Since `keccak256` is opaque, it
+    cannot be discharged by `decide`; for concrete types it is checked by native
+    evaluation (the FFI), which trusts the C implementation. -/
 def Fits : (t : Ty) → Value t → Prop
   | .unit, _ => True
   | .word, _ => True
