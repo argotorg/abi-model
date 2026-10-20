@@ -220,6 +220,14 @@ Random cases are generated type-first from the fragment the std can encode
 (`AbiDiff.supported`; arrays are restricted to `memory<DynArray<uint256>>`), so
 the generated Solcore is well typed by construction.
 
+## Bugs found
+
+Bugs in Solcore found by the differential tests:
+
+| #   | Solcore rev | Component                                    | Symptom                                                                                                                                                        | Found by                                                     | Status                                                                      |
+| --- | ----------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| 1   | `a7b7afb`   | `ABIEncode<ABITuple<tuple>>` (`std/std.sol`) | A dynamic `ABITuple` writes its offset to `basePtr` instead of `basePtr + offset`, overwriting the first word of the enclosing region (a field, or a sum's tag) | `nix run .#diff` (fixed cases; random cases with `--seed 2`) | One-line fix and regression tests on `fix/abituple-head-offset`, not merged |
+
 ## Continuous integration
 
 - `lean_action_ci.yml`: `lake build` on every push and pull request.
