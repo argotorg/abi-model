@@ -1,0 +1,62 @@
+name: Differential test against Solcore
+
+# Automatic runs (push, pull_request and the weekly schedule) are disabled
+# until the fixes for the bugs found by the model are merged into solcore and
+# solcore-rs; until then the workflow only runs when triggered manually.
+on:
+  workflow_dispatch:
+  # push:
+  # pull_request:
+  # schedule:
+  #   # weekly, against the current Solcore main (see the `solcore` input below)
+  #   - cron: "0 6 * * 1"
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pinned: the Solcore revision in flake.lock (every push / PR);
+        # main: the current Solcore main (scheduled and manual runs only)
+        solcore: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["pinned","main"]' || '["pinned"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+
+      - name: Fixed cases
+        id: fixed
+        continue-on-error: true
+        run: |
+          override=()
+          [[ "${{ matrix.solcore }}" == main ]] && override=(--override-input solcore github:argotorg/solcore)
+          nix run "${override[@]}" .#diff -- --out out/fixed
+
+      - name: Random cases
+        id: random
+        continue-on-error: true
+        run: |
+          override=()
+          [[ "${{ matrix.solcore }}" == main ]] && override=(--override-input solcore github:argotorg/solcore)
+          nix run "${override[@]}" .#diff -- --random --seed "${{ github.run_number }}" --n 100 --out out/random
+
+      - name: Report
+        if: always()
+        run: |
+          for r in out/fixed/report.md out/random/report.md; do
+            [[ -f "$r" ]] && { cat "$r"; echo; } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: solcore-diff-${{ matrix.solcore }}
+          path: |
+            out/*/report.md
+            out/*/regressions/
+            out/*/batches/*.sol
+            out/*/batches/*.json
+
+      - name: Fail on divergence
+        if: steps.fixed.outcome == 'failure' || steps.random.outcome == 'failure'
+        run: exit 1
