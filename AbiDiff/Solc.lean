@@ -50,6 +50,60 @@ def hexToWords (s : String) : List Nat :=
 
 /-! ## Types and values -/
 
+/-!
+An enum constructor's fields invert `constrRep` (`DeriveGeneric.hs`): a `unit`
+payload is a nullary constructor, a right-nested `pair` is several fields, and
+anything else is one field. The tag solcore derives from the declaration is then
+the model's `ctorTag`.
+-/
+
+mutual
+
+/-- Compact, readable rendering of a model type. -/
+def showTy : Ty → String
+  | .unit => "unit"
+  | .word => "word"
+  | .bool => "bool"
+  | .pair a b => s!"pair {showArg a} {showArg b}"
+  | .sum a b => s!"sum {showArg a} {showArg b}"
+  | .tup a => s!"tup {showArg a}"
+  | .array a => s!"array {showArg a}"
+  | .enum n t cs => "enum {" ++ showCtor n t ++ showCtors cs ++ "}"
+
+def showArg : Ty → String
+  | .unit => "unit" | .word => "word" | .bool => "bool"
+  | t => "(" ++ showTy t ++ ")"
+
+def showCtor (n : String) (t : Ty) : String := s!"{n} {showArg t}"
+
+def showCtors : Ctors → String
+  | .last m u => " | " ++ showCtor m u
+  | .cons m u cs => " | " ++ showCtor m u ++ showCtors cs
+
+end
+
+/-- The Solcore name of an enum type. Model enums have no type name, so it is
+    derived from the structure: equal enums share one declaration. -/
+def enumName (t : Ty) : String := "E_" ++ hexPad 16 (hash (showTy t)).toNat
+
+mutual
+
+/-- Whether an `ABITuple` occurs in a type. -/
+def hasTup : Ty → Bool
+  | .unit | .word | .bool => false
+  | .pair a b | .sum a b => hasTup a || hasTup b
+  | .tup _ => true
+  | .array a => hasTup a
+  | .enum _ t cs => hasTup t || hasTupC cs
+
+def hasTupC : Ctors → Bool
+  | .last _ u => hasTup u
+  | .cons _ u cs => hasTup u || hasTupC cs
+
+end
+
+mutual
+
 /-- The Solcore type of a model type, when the std can `abi_encode` it from memory. -/
 def solTy : Ty → Option String
   | .unit => some "()"
@@ -61,8 +115,57 @@ def solTy : Ty → Option String
   -- `ABIEncode<memory<DynArray<t>>>` requires `t : Typedef<word>` (std.sol)
   | .array .word => some "memory<DynArray<uint256>>"
   | .array _ => none
+  -- the derived `ABIDecode` of an enum needs `ABIDecode<ABITuple<…>>` for an
+  -- `ABITuple` field, which no instance provides
+  | .enum n t cs => do
+      if hasTup t || hasTupC cs then none
+      let _ ← solCtor n t
+      let _ ← solCtors cs
+      pure (enumName (.enum n t cs))
+  termination_by t => (sizeOf t, 0)
+
+/-- Field types along a payload's `pair` spine. -/
+def solFields : Ty → Option (List String)
+  | .pair a b => do pure ((← solTy a) :: (← solFields b))
+  | t => do pure [← solTy t]
+  termination_by t => (sizeOf t, 1)
+
+/-- A constructor declaration `Name(field, …)`, or `Name` when nullary. -/
+def solCtor (n : String) : Ty → Option String
+  | .unit => some n
+  | t => do pure s!"{n}({", ".intercalate (← solFields t)})"
+  termination_by t => (sizeOf t, 2)
+
+def solCtors : Ctors → Option (List String)
+  | .last m u => do pure [← solCtor m u]
+  | .cons m u cs => do pure ((← solCtor m u) :: (← solCtors cs))
+  termination_by cs => (sizeOf cs, 0)
+
+end
 
 def supported (t : Ty) : Bool := (solTy t).isSome
+
+mutual
+
+/-- Declarations of the enums occurring in `t`, nested ones first. -/
+def enumDecls : Ty → List String
+  | .unit | .word | .bool => []
+  | .pair a b | .sum a b => enumDecls a ++ enumDecls b
+  | .tup a | .array a => enumDecls a
+  | .enum n t cs =>
+      let decl := match solCtor n t, solCtors cs with
+        | some c, some cs' =>
+            [s!"enum {enumName (.enum n t cs)} \{ {", ".intercalate (c :: cs')} }"]
+        | _, _ => []
+      enumDecls t ++ enumDeclsC cs ++ decl
+
+def enumDeclsC : Ctors → List String
+  | .last _ u => enumDecls u
+  | .cons _ u cs => enumDecls u ++ enumDeclsC cs
+
+end
+
+mutual
 
 def solExpr : (t : Ty) → Value t → String
   | .unit, _ => "()"
@@ -73,23 +176,34 @@ def solExpr : (t : Ty) → Value t → String
   | .sum _ b, .inr y => s!"inr({solExpr b y})"
   | .tup a, x => s!"ABITuple({solExpr a x})"
   | .array a, xs => "[" ++ ", ".intercalate (xs.attach.map fun ⟨x, _⟩ => solExpr a x) ++ "]"
+  | .enum n t cs, v => enumName (.enum n t cs) ++ "." ++ armExpr n t cs v
+  termination_by t => (sizeOf t, 0)
 
-/-- Compact, readable rendering of a model type. -/
-def showTy : Ty → String
-  | .unit => "unit"
-  | .word => "word"
-  | .bool => "bool"
-  | .pair a b => s!"pair {showArg a} {showArg b}"
-  | .sum a b => s!"sum {showArg a} {showArg b}"
-  | .tup a => s!"tup {showArg a}"
-  | .array a => s!"array {showArg a}"
-where
-  showArg : Ty → String
-    | .unit => "unit" | .word => "word" | .bool => "bool"
-    | t => "(" ++ showTy t ++ ")"
+/-- The selected constructor applied to its fields. -/
+def armExpr : (n : String) → (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → String
+  | n, t, _, .inl x => ctorExpr n t x
+  | _, _, .cons m u cs, .inr y => armExpr m u cs y
+  | _, _, .last m u, .inr y => ctorExpr m u y
+  termination_by _ t cs => (sizeOf t + sizeOf cs, 0)
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
+
+def ctorExpr (n : String) : (t : Ty) → Value t → String
+  | .unit, _ => n
+  | t, x => n ++ "(" ++ ", ".intercalate (fieldExprs t x) ++ ")"
+  termination_by t => (sizeOf t, 2)
+
+/-- Field values along the payload's `pair` spine, as `solFields`. -/
+def fieldExprs : (t : Ty) → Value t → List String
+  | .pair a b, v => solExpr a v.1 :: fieldExprs b v.2
+  | t, x => [solExpr t x]
+  termination_by t => (sizeOf t, 1)
+
+end
 
 def showWord (w : Word) : String :=
   if w.toNat < 2 ^ 32 then toString w.toNat else "0x" ++ String.ofList (Nat.toDigits 16 w.toNat)
+
+mutual
 
 def showVal : (t : Ty) → Value t → String
   | .unit, _ => "()"
@@ -100,6 +214,18 @@ def showVal : (t : Ty) → Value t → String
   | .sum _ b, .inr y => s!"inr {showVal b y}"
   | .tup a, x => s!"tup {showVal a x}"
   | .array a, xs => "[" ++ ", ".intercalate (xs.attach.map fun ⟨x, _⟩ => showVal a x) ++ "]"
+  | .enum n t cs, v => showArm n t cs v
+  termination_by t => sizeOf t
+
+/-- The selected constructor and its payload, e.g. `P 9`. -/
+def showArm : (n : String) → (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → String
+  | n, t, _, .inl x => s!"{n} {showVal t x}"
+  | _, _, .cons m u cs, .inr y => showArm m u cs y
+  | _, _, .last m u, .inr y => s!"{m} {showVal u y}"
+  termination_by _ t cs => sizeOf t + sizeOf cs
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
+
+end
 
 def Case.describe (c : Case) : String := s!"{showTy c.t} = {showVal c.t c.v}"
 
@@ -110,6 +236,8 @@ def Case.expected (c : Case) : List (String × Word) :=
 
 def Case.expectedHex (c : Case) : String := hexWire (returnWords (encodeBytes c.t c.v))
 
+mutual
+
 /-- Feature tags, for the per-area summary. -/
 def tags : Ty → List String
   | .unit | .word | .bool => []
@@ -117,6 +245,13 @@ def tags : Ty → List String
   | .sum a b => "sums" :: tags a ++ tags b
   | .tup a => "ABITuple" :: tags a
   | .array a => "arrays" :: tags a
+  | .enum _ t cs => "enums" :: tags t ++ ctorFeatTags cs
+
+def ctorFeatTags : Ctors → List String
+  | .last _ u => tags u
+  | .cons _ u cs => tags u ++ ctorFeatTags cs
+
+end
 
 def Case.areas (c : Case) : List String :=
   let ts := (tags c.t).eraseDups
@@ -150,9 +285,12 @@ pragma no-bounded-variable-condition ;
 // Generated by abi-model (`lake exe abidiff`). Do not edit.
 "
 
-/-- Source of a contract with one method per case, numbered by `ids`. -/
+/-- Source of a contract with one method per case, numbered by `ids`, after the
+    declarations of the enums the cases use. -/
 def solContract (cases : List (Nat × Case)) : String :=
-  header ++ "\ncontract AbiModelDiff {\n  constructor() {}\n\n" ++
+  let decls := (cases.flatMap fun (_, c) => enumDecls c.t).eraseDups
+  header ++ String.join (decls.map (· ++ "\n")) ++
+    "\ncontract AbiModelDiff {\n  constructor() {}\n\n" ++
     "\n".intercalate (cases.map fun (i, c) => solMethod i c) ++ "}\n"
 
 def jsonString (s : String) : String := Lean.Json.compress (Lean.Json.str s)

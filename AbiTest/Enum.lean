@@ -1,4 +1,5 @@
 import AbiModel.Check
+import AbiModel.EncodeAnn
 
 /-!
 Enum checks. Constructor tags are `keccak256("Name(argSigs)")` computed by the FFI
@@ -68,5 +69,16 @@ abbrev Opt : Ty := .enum "None" .unit (.last "Some" .word)
 #guard rt (.array E3) [Sum.inl 1, Sum.inr (Sum.inr (2, 3))]
 #guard rt (.enum "Wrap" S2 (.last "Other" (.array .word))) (Sum.inl (Sum.inr 8))
 #guard ctorTag "Wrap" S2 = FFI.keccakString "Wrap(sum(uint256,uint256))"
+
+/-! ### Byte-level wire and word roles (`encodeBytes`, `encodeAnn`) -/
+
+-- offsets become byte offsets (× 32); tags and lengths are unchanged
+#guard encodeBytes D3 (Sum.inr (Sum.inl [8, 9])) = [0x20, ctorTag "B" (.array .word), 0x40, 2, 8, 9]
+#guard (encodeAnn 32 D3 (Sum.inr (Sum.inl [8, 9]))).map (·.role) =
+  [.off, .tag, .off, .len, .data, .data]
+-- a static enum has no offsets; the fill up to the rep's head width is padding
+#guard encodeBytes E3 (Sum.inl 7) = encode E3 (Sum.inl 7)
+#guard (encodeAnn 32 E3 (Sum.inl 7)).map (·.role) = [.tag, .data, .pad, .pad]
+#guard (encodeAnn 32 Opt (Sum.inl ())).map (·.role) = [.tag, .pad]
 
 end AbiModel

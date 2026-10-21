@@ -39,7 +39,12 @@ def annHead (sc : Nat) : (t : Ty) → Value t → Nat → List Cell
       else [⟨.off, natW (sc * tb)⟩]
   | .tup a, v, tb => if isStatic a then annHead sc a v tb else [⟨.off, natW (sc * tb)⟩]
   | .array _, _, tb => [⟨.off, natW (sc * tb)⟩]
-  termination_by t => (sizeOf t, 0)
+  | .enum n t cs, v, tb =>
+      if isStatic t && isStaticC cs then
+        ⟨.tag, armTag n t cs v⟩ :: (annArmHead sc t cs v tb
+          ++ List.replicate (max (headWords t) (headWordsC cs) - armWords t cs v) ⟨.pad, 0⟩)
+      else [⟨.off, natW (sc * tb)⟩]
+  termination_by t => (sizeOf t, 1, 0)
 
 def annTail (sc : Nat) : (t : Ty) → Value t → List Cell
   | .unit, _ => []
@@ -58,17 +63,39 @@ def annTail (sc : Nat) : (t : Ty) → Value t → List Cell
   | .tup a, v => if isStatic a then [] else (annHead sc a v (headWords a) ++ annTail sc a v)
   | .array a, xs =>
       ⟨.len, natW xs.length⟩ :: (annHeadSeq sc a xs (xs.length * headWords a) ++ annTailSeq sc a xs)
-  termination_by t => (sizeOf t, 0)
+  | .enum n t cs, v =>
+      if isStatic t && isStaticC cs then []
+      else
+        ⟨.tag, armTag n t cs v⟩ :: (annArmHead sc t cs v (1 + max (headWords t) (maxArmC cs))
+          ++ List.replicate (max (headWords t) (maxArmC cs) - armWords t cs v) ⟨.pad, 0⟩
+          ++ annArmTail sc t cs v)
+  termination_by t => (sizeOf t, 1, 0)
+
+/-- `armHead` with roles and scaled offsets. -/
+def annArmHead (sc : Nat) : (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → Nat → List Cell
+  | t, _, .inl x, tb => annHead sc t x tb
+  | _, .cons _ u cs, .inr y, tb => annArmHead sc u cs y tb
+  | _, .last _ u, .inr y, tb => annHead sc u y tb
+  termination_by t cs => (sizeOf t + sizeOf cs, 0, 0)
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
+
+/-- `armTail` with roles and scaled offsets. -/
+def annArmTail (sc : Nat) : (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → List Cell
+  | t, _, .inl x => annTail sc t x
+  | _, .cons _ u cs, .inr y => annArmTail sc u cs y
+  | _, .last _ u, .inr y => annTail sc u y
+  termination_by t cs => (sizeOf t + sizeOf cs, 0, 0)
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
 
 def annHeadSeq (sc : Nat) : (a : Ty) → List (Value a) → Nat → List Cell
   | _, [], _ => []
   | a, x :: xs, tb => annHead sc a x tb ++ annHeadSeq sc a xs (tb + (encTail a x).length)
-  termination_by a xs => (sizeOf a, xs.length)
+  termination_by a xs => (sizeOf a, 2, xs.length)
 
 def annTailSeq (sc : Nat) : (a : Ty) → List (Value a) → List Cell
   | _, [] => []
   | a, x :: xs => annTail sc a x ++ annTailSeq sc a xs
-  termination_by a xs => (sizeOf a, xs.length)
+  termination_by a xs => (sizeOf a, 2, xs.length)
 
 end
 
@@ -98,7 +125,12 @@ theorem annHead_one : (t : Ty) → (v : Value t) → (tb : Nat) →
   | .tup a, v, tb => by
       by_cases h : isStatic a = true <;> simp_all [annHead, encHead, annHead_one a]
   | .array _, _, _ => by simp [annHead, encHead]
-  termination_by t => (sizeOf t, 0)
+  | .enum n t cs, v, tb => by
+      by_cases hs : (isStatic t && isStaticC cs) = true
+      · simp [annHead, encHead, hs, annArmHead_one t cs v tb]
+      · simp only [Bool.not_eq_true] at hs
+        simp [annHead, encHead, hs]
+  termination_by t => (sizeOf t, 1, 0)
 
 theorem annTail_one : (t : Ty) → (v : Value t) →
     (annTail 1 t v).map (·.val) = encTail t v
@@ -115,21 +147,46 @@ theorem annTail_one : (t : Ty) → (v : Value t) →
         simp_all [annTail, encTail, annHead_one a, annTail_one a]
   | .array a, xs => by
       simp [annTail, encTail, annHeadSeq_one a, annTailSeq_one a]
-  termination_by t => (sizeOf t, 0)
+  | .enum n t cs, v => by
+      by_cases hs : (isStatic t && isStaticC cs) = true
+      · simp [annTail, encTail, hs]
+      · simp only [Bool.not_eq_true] at hs
+        simp [annTail, encTail, hs, annArmHead_one t cs v, annArmTail_one t cs v]
+  termination_by t => (sizeOf t, 1, 0)
+
+theorem annArmHead_one : (t : Ty) → (cs : Ctors) → (v : Value t ⊕ ValueC cs) → (tb : Nat) →
+    (annArmHead 1 t cs v tb).map (·.val) = armHead t cs v tb
+  | t, _, .inl x, tb => by simp only [annArmHead, armHead]; exact annHead_one t x tb
+  | _, .cons _ u cs, .inr y, tb => by
+      rw [annArmHead.eq_2, armHead.eq_2]; exact annArmHead_one u cs y tb
+  | _, .last _ u, .inr y, tb => by
+      rw [annArmHead.eq_3, armHead.eq_3]; exact annHead_one u y tb
+  termination_by t cs => (sizeOf t + sizeOf cs, 0, 0)
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
+
+theorem annArmTail_one : (t : Ty) → (cs : Ctors) → (v : Value t ⊕ ValueC cs) →
+    (annArmTail 1 t cs v).map (·.val) = armTail t cs v
+  | t, _, .inl x => by simp only [annArmTail, armTail]; exact annTail_one t x
+  | _, .cons _ u cs, .inr y => by
+      rw [annArmTail.eq_2, armTail.eq_2]; exact annArmTail_one u cs y
+  | _, .last _ u, .inr y => by
+      rw [annArmTail.eq_3, armTail.eq_3]; exact annTail_one u y
+  termination_by t cs => (sizeOf t + sizeOf cs, 0, 0)
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
 
 theorem annHeadSeq_one : (a : Ty) → (xs : List (Value a)) → (tb : Nat) →
     (annHeadSeq 1 a xs tb).map (·.val) = encHeadSeq a xs tb
   | _, [], _ => by simp [annHeadSeq, encHeadSeq]
   | a, x :: xs, tb => by
       simp [annHeadSeq, encHeadSeq, annHead_one a, annHeadSeq_one a xs]
-  termination_by a xs => (sizeOf a, xs.length)
+  termination_by a xs => (sizeOf a, 2, xs.length)
 
 theorem annTailSeq_one : (a : Ty) → (xs : List (Value a)) →
     (annTailSeq 1 a xs).map (·.val) = encTailSeq a xs
   | _, [] => by simp [annTailSeq, encTailSeq]
   | a, x :: xs => by
       simp [annTailSeq, encTailSeq, annTail_one a, annTailSeq_one a xs]
-  termination_by a xs => (sizeOf a, xs.length)
+  termination_by a xs => (sizeOf a, 2, xs.length)
 
 end
 

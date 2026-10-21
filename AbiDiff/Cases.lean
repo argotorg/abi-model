@@ -32,7 +32,23 @@ def fixedCases : List Case := [
     (Sum.inl (5, [7]) : (Word × List Word) ⊕ List Word)⟩,
   ⟨.sum (.pair .word (.array .word)) (.array .word),
     (Sum.inr [7] : (Word × List Word) ⊕ List Word)⟩,
-  ⟨.pair .word (.sum .word (.array .word)), ((9, Sum.inr [1, 2]) : Word × (Word ⊕ List Word))⟩
+  ⟨.pair .word (.sum .word (.array .word)), ((9, Sum.inr [1, 2]) : Word × (Word ⊕ List Word))⟩,
+  -- static enums: one keccak tag word, padded to the rep's nested head width
+  ⟨.enum "P" .word (.last "Q" .word), (Sum.inr 8 : Word ⊕ Word)⟩,
+  ⟨.enum "A" .word (.cons "B" .word (.last "C" (.pair .word .word))),
+    (Sum.inl 7 : Word ⊕ (Word ⊕ Word × Word))⟩,
+  ⟨.enum "A" .word (.cons "B" .word (.last "C" (.pair .word .word))),
+    (Sum.inr (Sum.inr (5, 6)) : Word ⊕ (Word ⊕ Word × Word))⟩,
+  ⟨.enum "None" .unit (.last "Some" .word), (Sum.inl () : Unit ⊕ Word)⟩,
+  -- dynamic enums
+  ⟨.enum "A" .word (.cons "B" (.array .word) (.last "C" .word)),
+    (Sum.inr (Sum.inl [8, 9]) : Word ⊕ (List Word ⊕ Word))⟩,
+  ⟨.enum "A" .word (.cons "B" (.array .word) (.last "C" .word)),
+    (Sum.inr (Sum.inr 4) : Word ⊕ (List Word ⊕ Word))⟩,
+  -- enums inside a pair and inside another enum
+  ⟨.pair .word (.enum "P" .word (.last "Q" .word)), ((9, Sum.inl 3) : Word × (Word ⊕ Word))⟩,
+  ⟨.enum "Wrap" (.enum "P" .word (.last "Q" .word)) (.last "Other" (.array .word)),
+    (Sum.inl (Sum.inr 8) : (Word ⊕ Word) ⊕ List Word)⟩
 ]
 
 end AbiDiff
