@@ -1,12 +1,7 @@
-import AbiModel.Decode
+import AbiModel.Check
 import AbiModel.EncodeAnn
 
 namespace AbiModel
-
-/-- Wire-level round-trip check: re-encoding the decode of an encoding reproduces
-    the wire. `#guard` fails at elaboration if the Bool is false, so each line is a
-    machine-checked round-trip at that concrete type/value (no `sorry`). -/
-def rt (t : Ty) (v : Value t) : Bool := encode t (decode t (encode t v)) == encode t v
 
 -- array of static words
 #guard rt (.array .word) ([10,20,30] : List Word)
@@ -39,10 +34,6 @@ def rt (t : Ty) (v : Value t) : Bool := encode t (decode t (encode t v)) == enco
 #guard rt (.array (.sum .word (.array .word)))
           ([Sum.inl 1, Sum.inr [2,3]] : List (Word ⊕ List Word))
 
-/-- Exact-wire check against the std `abi_encode` layout (word-indexed). -/
-def wireIs (t : Ty) (v : Value t) (expected : List Nat) : Bool :=
-  (encode t v).map (·.toNat) == expected
-
 -- dynamic sum: branch offsets are relative to the tag word (std `newBase = tail`)
 #guard wireIs test1_dyn_sum_ty test1_dyn_sum_val [1, 0, 2, 3, 3, 6, 9, 2, 0, 4, 2, 1, 5, 2, 2, 6]
 
@@ -65,6 +56,9 @@ def wireIs (t : Ty) (v : Value t) (expected : List Nat) : Bool :=
           ([Sum.inr [1, 2], Sum.inl (3, [4])] : List ((Word × List Word) ⊕ List Word))
 #guard rt (.pair .word (.sum .word (.array .word)))
           ((9, Sum.inr [1, 2]) : Word × (Word ⊕ List Word))
+
+-- Enum checks evaluate constructor tags, i.e. the FFI `keccak256`, so they live in
+-- the natively compiled `AbiTest` library: see `AbiTest/Enum.lean`.
 
 end AbiModel
 

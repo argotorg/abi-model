@@ -1,4 +1,5 @@
 import AbiModel.Val
+import AbiModel.Sig
 
 namespace AbiModel
 
@@ -12,6 +13,18 @@ def padL (a b : Ty) : Nat := max (headWords a) (headWords b) - headWords a
 
 /-- Padding after an `inr` branch. -/
 def padR (a b : Ty) : Nat := max (headWords a) (headWords b) - headWords b
+
+/-- Tag word of the selected constructor of `enum n t cs`. -/
+def armTag : (n : String) → (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → Word
+  | n, t, _, .inl _ => ctorTag n t
+  | _, _, .cons m u cs, .inr y => armTag m u cs y
+  | _, _, .last m u, .inr _ => ctorTag m u
+
+/-- Head width of the selected constructor's payload. -/
+def armWords : (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → Nat
+  | t, _, .inl _ => headWords t
+  | _, .cons _ u cs, .inr y => armWords u cs y
+  | _, .last _ u, .inr _ => headWords u
 
 /-!
 Canonical ABI encoder in the head/tail scheme (word-indexed), aligned with the
@@ -28,6 +41,14 @@ A dynamic sum's tail block mirrors `ABIGeneric.sol`'s `encodeInto`: it is
 `[tag | branch head | padding | branch tail]`, where the branch head is padded to
 the widest branch (`max (headWords a) (headWords b)`) and the branch's own offsets
 are relative to the *tag word* (the std's `newBase = tail`, branch at offset 32).
+
+An `enum` (a derived multi-constructor type) mirrors the derived `ABIEncode`
+(`DeriveGeneric.buildABIEncodeSum` → `encodeVariant`): the same static/dynamic
+layout, but a single `ctorTag` word (`keccak256("Name(argSigs)")`) for the whole
+enum instead of one `0`/`1` word per level of its rep. A static enum is padded
+with zeros to the rep's (nested) `headWords`; a dynamic enum's tail block reserves
+the flat `1 + max` of the payload heads (`_innerHead`). solcore leaves those
+padding words unwritten; the model writes zeros.
 -/
 mutual
 
@@ -45,7 +66,12 @@ def encHead : (t : Ty) → Value t → Nat → Wire
       else [natW tb]
   | .tup a, v, tb => if isStatic a then encHead a v tb else [natW tb]
   | .array _, _, tb => [natW tb]
-  termination_by t => (sizeOf t, 0)
+  | .enum n t cs, v, tb =>
+      if isStatic t && isStaticC cs then
+        armTag n t cs v :: (armHead t cs v tb
+          ++ List.replicate (max (headWords t) (headWordsC cs) - armWords t cs v) (0 : Word))
+      else [natW tb]
+  termination_by t => (sizeOf t, 1, 0)
 
 def encTail : (t : Ty) → Value t → Wire
   | .unit, _ => []
@@ -64,7 +90,29 @@ def encTail : (t : Ty) → Value t → Wire
   | .tup a, v => if isStatic a then [] else (encHead a v (headWords a) ++ encTail a v)
   | .array a, xs =>
       natW xs.length :: (encHeadSeq a xs (xs.length * headWords a) ++ encTailSeq a xs)
-  termination_by t => (sizeOf t, 0)
+  | .enum n t cs, v =>
+      if isStatic t && isStaticC cs then []
+      else
+        armTag n t cs v :: (armHead t cs v (1 + max (headWords t) (maxArmC cs))
+          ++ List.replicate (max (headWords t) (maxArmC cs) - armWords t cs v) (0 : Word)
+          ++ armTail t cs v)
+  termination_by t => (sizeOf t, 1, 0)
+
+/-- Head of the selected constructor's payload of an enum (no tag word). -/
+def armHead : (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → Nat → Wire
+  | t, _, .inl x, tb => encHead t x tb
+  | _, .cons _ u cs, .inr y, tb => armHead u cs y tb
+  | _, .last _ u, .inr y, tb => encHead u y tb
+  termination_by t cs => (sizeOf t + sizeOf cs, 0, 0)
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
+
+/-- Tail of the selected constructor's payload of an enum. -/
+def armTail : (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → Wire
+  | t, _, .inl x => encTail t x
+  | _, .cons _ u cs, .inr y => armTail u cs y
+  | _, .last _ u, .inr y => encTail u y
+  termination_by t cs => (sizeOf t + sizeOf cs, 0, 0)
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
 
 /-- Element *heads* of an array, threading the tail cursor `tb`. For a static
     element type this is the inline element encoding; for a dynamic one it is the
@@ -72,13 +120,13 @@ def encTail : (t : Ty) → Value t → Wire
 def encHeadSeq : (a : Ty) → List (Value a) → Nat → Wire
   | _, [], _ => []
   | a, x :: xs, tb => encHead a x tb ++ encHeadSeq a xs (tb + (encTail a x).length)
-  termination_by a xs => (sizeOf a, xs.length)
+  termination_by a xs => (sizeOf a, 2, xs.length)
 
 /-- Element *tails* of an array (empty when the element type is static). -/
 def encTailSeq : (a : Ty) → List (Value a) → Wire
   | _, [] => []
   | a, x :: xs => encTail a x ++ encTailSeq a xs
-  termination_by a xs => (sizeOf a, xs.length)
+  termination_by a xs => (sizeOf a, 2, xs.length)
 
 end
 
