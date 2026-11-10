@@ -14,23 +14,22 @@ rendered from it is well typed by construction. Shrinking goes through Plausible
 namespace AbiDiff
 open AbiModel Plausible
 
-/-- Types of depth at most `n`, all `supported`. Without `tup`, no `ABITuple`
-    occurs (enum payloads, see `solTy`). -/
-def genTy (n : Nat) (tup : Bool := true) : Gen Ty :=
+/-- Types of depth at most `n`, all `supported`. With `payload` (an enum's
+    constructor fields) no `ABITuple` occurs (see `solTy`). -/
+def genTy (n : Nat) (payload : Bool := false) : Gen Ty :=
+  let leaves := [(4, pure .word), (1, pure .bool), (1, pure .unit), (2, pure (.array .word))]
   match n with
-  | 0 => Gen.frequency (pure .word)
-      [(4, pure .word), (1, pure .bool), (1, pure .unit), (2, pure (.array .word))]
-  | n + 1 => Gen.frequency (pure .word) ([
-      (3, pure .word), (1, pure .bool), (1, pure .unit), (2, pure (.array .word)),
-      (3, do return .pair (← genTy n tup) (← genTy n tup)),
-      (2, do return .sum (← genTy n tup) (← genTy n tup)),
+  | 0 => Gen.frequency (pure .word) leaves
+  | n + 1 => Gen.frequency (pure .word) (leaves ++ [
+      (3, do return .pair (← genTy n payload) (← genTy n payload)),
+      (2, do return .sum (← genTy n payload) (← genTy n payload)),
       -- two or three constructors, named by position so their tags are distinct
       (2, do
-        let t₀ ← genTy n false
-        let t₁ ← genTy n false
+        let t₀ ← genTy n true
+        let t₁ ← genTy n true
         if (← Gen.elements [true, false] (by decide)) then return .enum "A" t₀ (.last "B" t₁)
-        else return .enum "A" t₀ (.cons "B" t₁ (.last "C" (← genTy n false))))] ++
-      if tup then [(1, do return .tup (← genTy n))] else [])
+        else return .enum "A" t₀ (.cons "B" t₁ (.last "C" (← genTy n true))))] ++
+      if payload then [] else [(1, do return .tup (← genTy n))])
 
 def boundaryWords : List Word := [0, 1, 2, 2 ^ 255, 2 ^ 256 - 1, 2 ^ 256 - 2]
 

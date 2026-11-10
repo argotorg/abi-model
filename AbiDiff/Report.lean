@@ -23,8 +23,7 @@ structure Result where
 def shortHex (n : Nat) : String := "0x" ++ String.ofList (Nat.toDigits 16 n)
 
 /-- Word-by-word comparison; long runs of equal words are collapsed. -/
-def wordTable (c : Case) (actualHex : String) : String := Id.run do
-  let exp := c.expected
+def wordTable (exp : List (String × Word)) (actualHex : String) : String := Id.run do
   let act := hexToWords actualHex
   let n := max exp.length act.length
   let row (i : Nat) : Bool × String :=
@@ -38,7 +37,7 @@ def wordTable (c : Case) (actualHex : String) : String := Id.run do
   let keep (i : Nat) : Bool :=
     !(rows[i]!.1) || i == 0 || i + 1 == n ||
       (i > 0 && !(rows[i - 1]!.1)) || (i + 1 < n && !(rows[i + 1]!.1))
-  let mut out := "| # | expected (model) | actual (solcore) | role | |\n|---|---|---|---|---|\n"
+  let mut out := "| # | expected (model) | actual (solcore-rs) | role | |\n|---|---|---|---|---|\n"
   let mut skipped := false
   for i in List.range n do
     if keep i then
@@ -49,33 +48,38 @@ def wordTable (c : Case) (actualHex : String) : String := Id.run do
       skipped := true
   return out
 
+def Check.describe (i : Nat) : Check → String
+  | .encode => s!"`{methodName i}()` (encoding)"
+  | .echo => s!"`{echoName i}(v)` (decoding the model's calldata and re-encoding)"
+
 def caseBlock (id : Nat) (c : Case) (o : Outcome) : String :=
   let src := s!"```solidity\n{(solMethod id c).trimAsciiEnd.toString}\n```\n"
   match o with
-  | .diverge "failure" msg => src ++ s!"\nThe call **reverted** ({msg}).\n"
-  | .diverge actual msg =>
-      src ++ s!"\n{msg}\n\n" ++ wordTable c actual
+  | .diverge k "failure" msg => src ++ s!"\nThe call {k.describe id} **reverted** ({msg}).\n"
+  | .diverge k actual msg =>
+      let exp := match k with | .encode => c.expected | .echo => c.expectedEcho
+      src ++ s!"\nThe call {k.describe id} {msg}.\n\n" ++ wordTable exp actual
   | .compileFail err =>
       let lines := (err.splitOn "\n").filter (!·.trimAscii.isEmpty) |>.take 12
       src ++ "\n```\n" ++ "\n".intercalate lines ++ "\n```\n"
   | .agree => src
 
-def areas : List String := ["static", "dynamic", "arrays", "sums", "ABITuple"]
+def areas : List String := ["static", "dynamic", "arrays", "sums", "ABITuple", "enums", "calldata"]
 
 def report (m : Meta) (rs : List Result) : String := Id.run do
   let agree := rs.filter (·.outcome.isAgree)
   let diverge := rs.filter (·.outcome.isDiverge)
   let failed := rs.filter fun r => !r.outcome.isAgree && !r.outcome.isDiverge
-  let mut s := "# abi-model × Solcore: differential report\n\n"
+  let mut s := "# abi-model × solcore-rs: differential report\n\n"
   s := s ++ "| | |\n|---|---|\n"
-  s := s ++ s!"| Solcore | `{m.solcore}` |\n| abi-model | `{m.abiModel}` |\n"
+  s := s ++ s!"| solcore-rs | `{m.solcore}` |\n| abi-model | `{m.abiModel}` |\n"
   s := s ++ s!"| Mode | {m.mode} |\n| Date | {m.date} |\n| solc | {m.solc} |\n\n"
   s := s ++ "## Summary\n\n| Outcome | Count |\n|---|---|\n"
   s := s ++ s!"| ✅ agree | {agree.length} |\n| ❌ diverge | {diverge.length} |\n"
   s := s ++ s!"| ⚠️ compile-fail | {failed.length} |\n\n"
   s := s ++ "| Area | agree / total |\n|---|---|\n"
   for a in areas do
-    let inA := rs.filter (·.case.areas.contains a)
+    let inA := rs.filter (·.case.allAreas.contains a)
     if !inA.isEmpty then
       let ok := inA.filter (·.outcome.isAgree)
       s := s ++ s!"| {a} | {ok.length} / {inA.length} |\n"

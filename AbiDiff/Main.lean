@@ -16,10 +16,12 @@ structure Opts where
 def usage : String :=
 "usage: abidiff [--random] [--seed S] [--n N] [--depth D] [--out DIR] [--batch B] [--no-shrink]
 
-Generates Solcore contracts from the Lean ABI model, runs them with Solcore
-(scripts/run-solcore.sh) and writes DIR/report.md. Without --random it runs the
-fixed cases of AbiDiff/Cases.lean. Exits 1 if any case diverges or fails to
-compile. Needs SOLCORE_SRC and EVMONE (nix develop, or nix run .#diff)."
+Generates solcore-rs contracts from the Lean ABI model, compiles them with
+solcore-rs and solc, runs them on Anvil (scripts/run-solcore-rs.sh) and writes
+DIR/report.md. Without --random it runs the fixed cases of AbiDiff/Cases.lean.
+Exits 1 if any case diverges or fails to compile. Needs `solcore` (or SOLCORE),
+`solc`, `anvil`, `curl` and `jq` (nix develop, or nix run .#diff). Set
+ABIDIFF_RPC to use a running Anvil instead of starting one."
 
 partial def parseArgs (o : Opts) : List String → Except String Opts
   | [] => .ok o
@@ -48,17 +50,45 @@ def cmdOut (cmd : String) (args : Array String) : IO String := do
     return if o.exitCode == 0 then o.stdout.trimAscii.toString else "unknown"
   catch _ => return "unknown"
 
-def main (args : List String) : IO UInt32 := do
-  if args.contains "--help" then IO.println usage; return 0
-  let o ← match parseArgs {} args with
-    | .ok o => pure o
-    | .error e => IO.eprintln s!"{e}\n\n{usage}"; return 2
+/-- Whether a JSON-RPC node answers at `url`. -/
+def rpcUp (url : String) : IO Bool := do
+  try
+    let o ← IO.Process.output { cmd := "curl", args := #["-sS", "--fail", "--max-time", "2",
+      "-H", "Content-Type: application/json", "--data",
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}", url] }
+    return o.exitCode == 0
+  catch _ => return false
+
+abbrev Silent : IO.Process.StdioConfig :=
+  { stdin := IO.Process.Stdio.null, stdout := IO.Process.Stdio.null,
+    stderr := IO.Process.Stdio.null }
+
+/-- Start Anvil on a free-looking port, as solcore-rs's E2E harness configures
+    it (osaka; no code-size limit, since a batch is one large contract). -/
+partial def startAnvil (attempts : Nat := 5) : IO (IO.Process.Child Silent × String) := do
+  let port := 20000 + (← IO.monoNanosNow) % 20000
+  let url := s!"http://127.0.0.1:{port}"
+  let sa : IO.Process.SpawnArgs := {
+    toStdioConfig := Silent
+    cmd := "anvil"
+    args := #["--port", toString port, "--hardfork", "osaka", "--silent",
+      "--disable-code-size-limit"] }
+  let child ← IO.Process.spawn sa
+  for _ in List.range 100 do
+    if ← rpcUp url then return (child, url)
+    if (← child.tryWait).isSome then break
+    IO.sleep 100
+  child.kill
+  if attempts ≤ 1 then throw <| IO.userError "cannot start anvil"
+  startAnvil (attempts - 1)
+
+def run (o : Opts) (rpc : String) : IO UInt32 := do
   let dir : System.FilePath := o.out
   -- start from a clean output directory, but only delete one we created
   if ← (dir / ".abidiff").pathExists then IO.FS.removeDirAll dir
   IO.FS.createDirAll (dir / "batches")
   IO.FS.writeFile (dir / ".abidiff") ""
-  let ctx : Ctx := { dir := dir / "batches", counter := ← IO.mkRef 0 }
+  let ctx : Ctx := { dir := dir / "batches", counter := ← IO.mkRef 0, rpc }
 
   let seed ← match o.seed with
     | some s => pure s
@@ -85,8 +115,8 @@ def main (args : List String) : IO UInt32 := do
           pure (fc, fo)
         else pure (c, oc)
       let name := s!"case{i}"
-      writeBatch (dir / "regressions") name [(0, fc)]
-      r := { r with regression := some (dir / "regressions" / s!"{name}.\{sol,json}").toString }
+      let p ← writeBatch (dir / "regressions") name [(0, fc)]
+      r := { r with regression := some p.toString }
     results := results ++ [r]
 
   let solc ← cmdOut "solc" #["--version"]
@@ -102,3 +132,12 @@ def main (args : List String) : IO UInt32 := do
   let bad := results.filter (!·.outcome.isAgree)
   IO.println s!"abidiff: {results.length - bad.length}/{results.length} agree; report in {dir / "report.md"}"
   return if bad.isEmpty then 0 else 1
+
+def main (args : List String) : IO UInt32 := do
+  if args.contains "--help" then IO.println usage; return 0
+  let o ← match parseArgs {} args with
+    | .ok o => pure o
+    | .error e => IO.eprintln s!"{e}\n\n{usage}"; return 2
+  if let some url ← IO.getEnv "ABIDIFF_RPC" then return ← run o url
+  let (anvil, url) ← startAnvil
+  try run o url finally anvil.kill

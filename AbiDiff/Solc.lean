@@ -255,62 +255,172 @@ end
 
 def Case.areas (c : Case) : List String :=
   let ts := (tags c.t).eraseDups
-  let ts := if isStatic c.t then "static" :: ts else "dynamic" :: ts
-  ts
+  if isStatic c.t then "static" :: ts else "dynamic" :: ts
 
-/-! ## Contract and test file -/
+/-! ## Calldata round trip
+
+Besides `caseI()`, which checks the encoder (`abi_encode` of a value built in
+memory), a case whose type can be a public parameter gets
+`echoI(x: T) returns (T) { return x; }`, called with the model's encoding as
+calldata. The dispatcher decodes it and re-encodes the result, so the call
+checks the decoder: it must return the calldata's argument bytes unchanged.
+-/
+
+mutual
+
+/-- The signature fragment solcore-rs derives for a type inside an enum's
+    generic representation (`generic_sig_string`, `hir-ty/src/contract/abi.rs`):
+    products are flattened without parentheses, `unit` is empty, a sum is
+    `sum(a,b)`, and an enum is its representation, a right-nested sum of its
+    constructors' payloads (`derived_generic.rs`). -/
+def repSig : Ty → Option String
+  | .unit => some ""
+  | .word => some "uint256"
+  | .bool => some "bool"
+  | .pair a b => do pure s!"{← repSig a},{← repSig b}"
+  | .sum a b => do pure s!"sum({← repSig a},{← repSig b})"
+  | .tup _ => none
+  | .array .word => some "uint256[]"
+  | .array _ => none
+  | .enum _ t cs => repSigArms t cs
+  termination_by t => (sizeOf t, 1)
+
+def repSigArms : Ty → Ctors → Option String
+  | t, .last _ u => do pure s!"sum({← repSig t},{← repSig u})"
+  | t, .cons _ u cs => do pure s!"sum({← repSig t},{← repSigArms u cs})"
+  termination_by t cs => (sizeOf t + sizeOf cs, 0)
+  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
+
+end
+
+mutual
+
+/-- The selector signature of a parameter type (`signature_type_string`), or
+    `none` when solcore-rs's dispatch rejects the type: `unit` (also as a
+    product member), sums, `ABITuple`, and arrays of anything but `uint256`.
+    Nested products are flattened into one tuple. -/
+def paramSig : Ty → Option String
+  | .word => some "uint256"
+  | .bool => some "bool"
+  | .array .word => some "uint256[]"
+  | .pair a b => do pure ("(" ++ ",".intercalate ((← paramFields a) ++ (← paramFields b)) ++ ")")
+  | .enum n t cs => repSig (.enum n t cs)
+  | _ => none
+  termination_by t => (sizeOf t, 1)
+
+def paramFields : Ty → Option (List String)
+  | .pair a b => do pure ((← paramFields a) ++ (← paramFields b))
+  | .unit => none
+  | t => do pure [← paramSig t]
+  termination_by t => (sizeOf t, 2)
+
+end
+
+/-- Whether the case also checks the decoder through an `echo` method. -/
+def Case.echoes (c : Case) : Bool := supported c.t && (paramSig c.t).isSome
+
+/-- Report areas of a case; `calldata` when it also checks the decoder. -/
+def Case.allAreas (c : Case) : List String :=
+  c.areas ++ if c.echoes then ["calldata"] else []
+
+/-! ## Contract and test fixture -/
 
 def methodName (i : Nat) : String := s!"case{i}"
+def echoName (i : Nat) : String := s!"echo{i}"
 
 def selectorHex (i : Nat) : String := hexPad 8 (FFI.selector s!"{methodName i}()").toNat
 
+/-- A call of a generated method: its calldata and the return data the model
+    predicts (hex, without `0x`). -/
+structure Call where
+  label : String
+  calldata : String
+  returndata : String
+
+/-- The call that checks case `i`'s encoding: `caseI()` returns `abi_encode(v)`. -/
+def Case.call (c : Case) (i : Nat) : Call :=
+  { label := s!"{methodName i}: {c.describe}", calldata := selectorHex i,
+    returndata := c.expectedHex }
+
+/-- The call that checks case `i`'s decoding: `echoI(v)` returns `v`. -/
+def Case.echoCall (c : Case) (i : Nat) : Option Call := do
+  if !c.echoes then none
+  let sig ← paramSig c.t
+  let sel := hexPad 8 (FFI.selector s!"{echoName i}({sig})").toNat
+  let args := hexWire (encodeBytes c.t c.v)
+  pure { label := s!"{echoName i}: {c.describe}", calldata := sel ++ args, returndata := args }
+
+/-- The calls of case `i`: the encoder check, then the decoder check if any. -/
+def Case.calls (c : Case) (i : Nat) : List Call := c.call i :: (c.echoCall i).toList
+
+/-- Model prediction for the echo call's return data, labelled by role. -/
+def Case.expectedEcho (c : Case) : List (String × Word) :=
+  (encodeAnn 32 c.t c.v).map fun cell => (cell.role.name, cell.val)
+
 def solMethod (i : Nat) (c : Case) : String :=
   let ty := (solTy c.t).getD "<unsupported>"
-  s!"  // {c.describe}
-  function {methodName i}() public returns (memory<bytes>) \{
-    let v : {ty} = {solExpr c.t c.v};
-    return abi_encode(v);
-  }
-"
+  let echo := if c.echoes then s!"
+    function {echoName i}(x: {ty}) public returns ({ty}) \{
+        return x;
+    }
+" else ""
+  s!"    // {c.describe}
+    function {methodName i}() public returns (memory<bytes>) \{
+        let v: {ty} = {solExpr c.t c.v};
+        return abi_encode(v);
+    }
+" ++ echo
 
 def header : String :=
-"import * from std;
+"pragma solcore;
+
+import * from std;
 import * from std.dispatch;
 import * from std.Generic;
 import * from std.ABIGeneric;
-pragma no-patterson-condition ;
-pragma no-coverage-condition ;
-pragma no-bounded-variable-condition ;
+pragma no-patterson-condition;
+pragma no-coverage-condition;
+pragma no-bounded-variable-condition;
 
 // Generated by abi-model (`lake exe abidiff`). Do not edit.
 "
 
-/-- Source of a contract with one method per case, numbered by `ids`, after the
-    declarations of the enums the cases use. -/
-def solContract (cases : List (Nat × Case)) : String :=
+/-- A string literal of solcore-rs's E2E directives. -/
+def directiveString (s : String) : String :=
+  "\"" ++ String.join (s.toList.map fun
+    | '"' => "\\\"" | '\\' => "\\\\" | '\n' => " " | c => c.toString) ++ "\""
+
+/-- The E2E scenario of solcore-rs (`crates/test-directives`): deploy the
+    contract, then one `raw` call per check with the predicted return data. -/
+def scenario (name : String) (calls : List Call) : String :=
+  let raw (c : Call) :=
+    s!"// #[raw(0x{c.calldata}, label = {directiveString c.label}) -> success(0x{c.returndata})]\n"
+  s!"// #[scenario({directiveString name})]\n// constructor()\n// #[deploy(0x) -> success]\n" ++
+    String.join (calls.map raw)
+
+/-- A contract with the methods of each case, numbered by `ids`, after the
+    declarations of the enums the cases use. The comment block before the
+    contract is a solcore-rs E2E scenario, so the file is also a regression test
+    for solcore-rs's `tests/e2e/<name>/main.sol`. -/
+def solContract (name : String) (cases : List (Nat × Case)) : String :=
   let decls := (cases.flatMap fun (_, c) => enumDecls c.t).eraseDups
-  header ++ String.join (decls.map (· ++ "\n")) ++
-    "\ncontract AbiModelDiff {\n  constructor() {}\n\n" ++
+  header ++ String.join (decls.map (· ++ "\n")) ++ "\n" ++
+    scenario name (cases.flatMap fun (i, c) => c.calls i) ++
+    "contract AbiModelDiff {\n    constructor() {}\n\n" ++
     "\n".intercalate (cases.map fun (i, c) => solMethod i c) ++ "}\n"
 
-def jsonString (s : String) : String := Lean.Json.compress (Lean.Json.str s)
+/-- The calldata of each call, one hex string per line (the runner's input). -/
+def callsFile (cases : List (Nat × Case)) : String :=
+  String.join (cases.flatMap fun (i, c) => (c.calls i).map (·.calldata ++ "\n"))
 
-/-- The test file in the format of solcore's `test/examples/dispatch/*.json`. -/
-def testJson (suite : String) (cases : List (Nat × Case)) : String :=
-  let ctor := "      { \"kind\": \"constructor\", \"input\": { \"comment\": \"constructor()\", \"calldata\": \"\", \"value\": \"0\" } }"
-  let call (i : Nat) (c : Case) :=
-    s!"      \{ \"kind\": \"call\",
-        \"input\": \{ \"comment\": {jsonString s!"{methodName i}: {c.describe}"}, \"calldata\": \"{selectorHex i}\", \"value\": \"0\" },
-        \"output\": \{ \"status\": \"success\", \"returndata\": \"{c.expectedHex}\" } }"
-  s!"\{
-  \"{suite}\": \{
-    \"bytecode\": \"\",
-    \"contract\": \"AbiModelDiff\",
-    \"tests\": [
-" ++ ",\n".intercalate (ctor :: cases.map fun (i, c) => call i c) ++ "
-    ]
-  }
-}
-"
+-- selector signatures as solcore-rs derives them (checked against its
+-- dispatcher: a wrong selector makes the echo call revert)
+#guard paramSig (.pair .word (.pair .bool (.array .word))) == some "(uint256,bool,uint256[])"
+#guard paramSig (.pair .unit .word) == none
+#guard paramSig (.sum .word .word) == none
+#guard paramSig (.enum "A" .word (.cons "B" (.pair .bool .word) (.last "C" .unit))) ==
+  some "sum(uint256,sum(bool,uint256,))"
+#guard paramSig (.enum "A" (.sum .word .bool) (.last "B" (.enum "P" .word (.last "Q" .unit)))) ==
+  some "sum(sum(uint256,bool),sum(uint256,))"
 
 end AbiDiff

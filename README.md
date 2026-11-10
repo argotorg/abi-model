@@ -7,8 +7,8 @@ parts:
 
 1. a **verified model**: an encoder, a decoder and machine-checked
    **round-trip** theorems (no `sorry`);
-2. a **differential test harness** that compiles Solcore contracts generated
-   from the model, runs them on the EVM and compares the bytes Solcore produces
+2. a **differential test harness** that compiles solcore-rs contracts generated
+   from the model, runs them on the EVM and compares the bytes solcore-rs produces
    with the model's prediction.
 
 ## What it models
@@ -19,10 +19,12 @@ dynamic arrays:
 - products are right-nested `pair`s;
 - the primitive **binary sum** `sum f g` (`ABIGeneric.sol`'s `sum<f, g>`), with a
   tag word `0 = inl`, `1 = inr` at every nesting level;
-- a derived **multi-constructor enum** `enum n₀ t₀ cs` (`DeriveGeneric.hs`), with
-  the same static/dynamic layout as its SOP rep `sum<t₀, sum<t₁, …>>` but a
-  *single* tag word `keccak256("Name(argSigs)")` (computed by the FFI
-  `keccak256`, signatures in `AbiModel/Sig.lean`);
+- a derived **multi-constructor enum** `enum n₀ t₀ cs` (solcore-rs
+  `derived_abi.rs`), static exactly when its SOP rep `sum<t₀, sum<t₁, …>>` is,
+  but with a *single* tag word `keccak256("Name(argSigs)")` (computed by the FFI
+  `keccak256`, signatures in `AbiModel/Sig.lean`) and a flat layout: one tag
+  word and the widest payload head, `1 + max(h₀, h₁, …)`, where the rep would
+  nest one tag word per level;
 - `tup` is the ABITuple grouping wrapper;
 - **`array a` is a dynamic array** of `a` (element type may itself be dynamic);
 - atoms `word`, `bool`, and `unit`.
@@ -37,7 +39,8 @@ Encoding is **head/tail canonical**, aligned with the std `ABIEncode.encodeInto`
   word** into the head. The offset points at the node's block in the shared
   tail. An array of dynamic elements gets an inner offset table, like the std
   `abiArrayGet`.
-- A static `sum` writes `[tag | branch]`, padded to the widest branch.
+- A static `sum` writes `[tag | branch]`, padded to the widest branch. A static
+  enum writes `[tag | payload]`, padded to the widest payload.
 - A dynamic `sum` puts the same padded `[tag | branch head]` block in the tail,
   followed by the branch's tail. The branch's offsets are relative to the tag
   word, as in `ABIGeneric.sol`'s `encodeInto` (`newBase = tail`, branch at
@@ -161,17 +164,17 @@ FFI `keccak256` against OpenSSL known answers. The whole project builds with
 | `c/ffi.c`, `c/sha3/`       | C glue and the vendored SHA3IUF Keccak implementation            |
 | `AbiTest/Keccak.lean`      | Keccak known-answer `#guard`s (`precompileModules`)              |
 | `AbiTest/Enum.lean`        | enum `#guard`s: tags, wires, round trips (`precompileModules`)   |
-| `AbiDiff/Solc.lean`        | renders a case as Solcore source and as the runner's JSON test   |
+| `AbiDiff/Solc.lean`        | renders cases as a solcore-rs contract with E2E directives      |
 | `AbiDiff/Cases.lean`       | hand-picked cases, one per layout rule                           |
 | `AbiDiff/Gen.lean`         | Plausible generators and shrinkers for random cases              |
-| `AbiDiff/Runner.lean`      | runs batches through Solcore, bisects compile failures, shrinks  |
+| `AbiDiff/Runner.lean`      | runs batches through solcore-rs, bisects compile failures, shrinks |
 | `AbiDiff/Report.lean`      | the Markdown report (`out/report.md`)                            |
 | `AbiDiff/Main.lean`        | `abidiff` command-line entry point                               |
 | `Main.lean`                | `abitest`: a small wire-level round-trip check                   |
 | `scripts/diff-solcore.sh`  | builds and runs `abidiff`                                        |
-| `scripts/run-solcore.sh`   | compiles one generated contract and runs its tests               |
-| `flake.nix`, `flake.lock`  | pins Solcore and the tools the differential test needs           |
-| `.github/workflows/`       | CI: `lake build`, and the differential test against Solcore      |
+| `scripts/run-solcore-rs.sh`| compiles one generated contract and runs its calls on Anvil      |
+| `flake.nix`, `flake.lock`  | pins solcore-rs and the tools the differential test needs        |
+| `.github/workflows/`       | CI: `lake build`, and the differential test against solcore-rs   |
 
 `AbiModel.FFI.keccak256 : ByteArray → ByteArray` is Ethereum's Keccak-256
 (original padding, as the `KECCAK256` opcode, not FIPS SHA3-256), implemented in
@@ -206,15 +209,18 @@ Lake targets (`lakefile.lean`):
 
 **Differential test** (all provided by `flake.nix`)
 
-- [Solcore](https://github.com/argotorg/solcore), from the flake input `solcore`
-  (pinned in `flake.lock`). It provides `sol-core` and `yule` (compiler),
-  `testrunner` (test runner), `evmone` (EVM) and the `std` library sources.
-- `solc` (compiles the generated Yul to bytecode), `jq`, `git`, `elan`,
-  `coreutils`.
+- [solcore-rs](https://github.com/argotorg/solcore-rs), from the flake input
+  `solcore-rs` (pinned in `flake.lock`). The flake builds its `solcore`
+  compiler with the Rust toolchain of its `rust-toolchain.toml`; its `std`
+  sources are passed to the compiler with `--std-root`.
+- `solc` (compiles the generated Yul to bytecode), `anvil` (Foundry; runs the
+  contracts), `curl` and `jq` (JSON-RPC), `git`, `elan`, `coreutils`.
 
-The flake exports three variables used by the scripts: `SOLCORE_SRC` (the
-Solcore sources, for `std`), `SOLCORE_REV` (the pinned revision, shown in the
-report) and `EVMONE` (path to `libevmone`).
+The flake exports three variables used by the scripts: `SOLCORE` (the compiler
+binary), `SOLCORE_STD` (the std library root) and `SOLCORE_REV` (the pinned
+revision, shown in the report). Each keeps a value already set in the
+environment, so a local build can be tested with, e.g.,
+`SOLCORE=../solcore-rs/target/debug/solcore SOLCORE_STD=../solcore-rs/std nix run .#diff`.
 
 ## Building and the Lean checks
 
@@ -237,12 +243,31 @@ lake build
 lake test
 ```
 
-## Differential tests against Solcore (Nix)
+## Differential tests against solcore-rs (Nix)
 
-For each case (a model type and a value of it), `abidiff` generates a Solcore
-method returning `abi_encode(v)` and a test file whose expected return data is
-the model's prediction (`encodeBytes`). The contracts are compiled with
-`sol-core`, `yule` and `solc` and run with Solcore's `testrunner` on evmone.
+For each case (a model type `T` and a value `v` of it), `abidiff` generates
+two solcore-rs methods and the calls that check them against the model:
+
+- `caseI()` returns `abi_encode(v)` for `v` built in memory, and must return
+  the model's encoding (`encodeBytes`) as `memory<bytes>`. This checks the
+  encoder.
+- `echoI(x: T) returns (T) { return x; }` is called with the selector followed
+  by the model's encoding of `v` as calldata, and must return those argument
+  bytes unchanged: the dispatcher decodes them and re-encodes the result. This
+  checks the decoder on canonical input. It is generated only when solcore-rs
+  accepts `T` as a public parameter: `uint256`, `bool`,
+  `memory<DynArray<uint256>>`, products of these without `()`, and derived
+  enums (whose payloads may hold sums). Sums, `ABITuple` and `()` are rejected
+  by its dispatch ABI. The selector signature is computed as solcore-rs
+  derives it (`AbiDiff.paramSig`): products are flattened into one tuple, and
+  an enum signs as its generic representation, e.g.
+  `enum E { A(uint256), B(bool, uint256), C }` as `sum(uint256,sum(bool,uint256,))`.
+
+Each batch of cases is one
+contract, compiled with `solcore --emit-yul` and `solc`, deployed on Anvil
+(`osaka`, as solcore-rs's E2E tests) and called over JSON-RPC
+(`scripts/run-solcore-rs.sh`). `abidiff` starts one Anvil per run; set
+`ABIDIFF_RPC` to use a node that is already running.
 
 Run from the repository root:
 
@@ -267,12 +292,12 @@ Options (everything after `--` is passed to `abidiff`):
 Set `SOLC_OPTIMIZE=1` to compile with the `solc` optimizer (it only changes
 gas, and it is slow on large batches).
 
-Choosing the Solcore revision:
+Choosing the solcore-rs revision:
 
 ```sh
-nix run .#diff --override-input solcore github:argotorg/solcore   # current Solcore main
-nix run .#diff --override-input solcore path:../solcore           # a local checkout
-nix flake update solcore                                          # move the pin to main
+nix run .#diff --override-input solcore-rs github:argotorg/solcore-rs   # current main
+nix run .#diff --override-input solcore-rs path:../solcore-rs           # a local checkout
+nix flake update solcore-rs                                             # move the pin to main
 ```
 
 Inside `nix develop` the driver can also be run directly:
@@ -282,40 +307,56 @@ Inside `nix develop` the driver can also be run directly:
 
 Each case ends as:
 
-- **agree**: Solcore returned exactly the predicted bytes;
-- **diverge**: Solcore returned other bytes, or reverted. Random cases are
+- **agree**: solcore-rs returned exactly the predicted bytes;
+- **diverge**: one of the case's calls returned other bytes, or reverted (the
+  report says which: encoding or echo). Random cases are
   shrunk with Plausible's `Shrinkable`;
-- **compile-fail**: Solcore rejected the generated source. A batch that does not
-  compile is bisected to find the offending cases.
+- **compile-fail**: solcore-rs rejected the generated source. A batch that
+  does not compile is bisected to find the offending cases.
 
 The output directory contains:
 
-- `report.md`: a summary per area (static, dynamic, arrays, sums, `ABITuple`),
+- `report.md`: a summary per area (static, dynamic, arrays, sums, `ABITuple`,
+  enums, and `calldata` for the cases with an echo call),
   and for each divergence the generated source and a word-by-word table, with
   every word labelled offset / tag / length / data / padding;
-- `regressions/`: a `.sol` + `.json` pair for each divergence, in the format of
-  Solcore's `test/examples/dispatch/` tests;
-- `batches/`: the generated contracts, test files and compiler logs.
+- `regressions/caseN/main.sol`: one contract per divergence. Its leading
+  comment block is a solcore-rs E2E scenario (`#[scenario]`, `#[deploy]`,
+  `#[raw(…) -> success(…)]`), so the directory can be copied as is to
+  solcore-rs's `tests/e2e/` and run with
+  `E2E=1 cargo test -p solcore-yul --test e2e`;
+- `batches/batchK/`: the generated contract (in the same format), its calldata
+  (`calls`), the call results (`out.jsonl`) and the compiler logs (`work/`).
 
 `abidiff` exits with `1` if any case diverges or fails to compile.
 
 Random cases are generated type-first from the fragment the std can encode
 (`AbiDiff.supported`; arrays are restricted to `memory<DynArray<uint256>>`), so
-the generated Solcore is well typed by construction.
+the generated source is well typed by construction.
+
+### Agreement with solcore-rs
+
+At the pinned solcore-rs (`f11d56f`) all cases agree, encoding and echo: the
+28 fixed cases (15 with an echo call), and the random runs with seeds 7
+(N = 100), 2 (N = 150) and 11 (N = 150, depth 4), 260 of whose 400 cases have
+an echo call.
 
 ## Bugs found
 
-Bugs in Solcore found by the differential tests:
+Bugs found by the differential tests in the Haskell Solcore
+([argotorg/solcore](https://github.com/argotorg/solcore)), the target of the
+harness before it moved to solcore-rs:
 
 | #   | Solcore rev | Component                                    | Symptom                                                                                                                                                        | Found by                                                     | Status                                                                      |
 | --- | ----------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| 1   | `a7b7afb`   | `ABIEncode<ABITuple<tuple>>` (`std/std.sol`) | A dynamic `ABITuple` writes its offset to `basePtr` instead of `basePtr + offset`, overwriting the first word of the enclosing region (a field, or a sum's tag) | `nix run .#diff` (fixed cases; random cases with `--seed 2`) | One-line fix and regression tests on `fix/abituple-head-offset`, not merged |
-| 2   | `a7b7afb`   | `SigString` resolution (`std/dispatch.sol`)  | An enum constructor with a `memory<DynArray<t>>` field gets the tag `keccak256("Name(<method>)")`: the `Generic` default `SigString` is picked without a `Generic` instance and signs as the enclosing method's name | `nix run .#diff` (fixed cases)                               | Open, not reported                                                          |
+| 1   | `a7b7afb`   | `ABIEncode<ABITuple<tuple>>` (`std/std.sol`) | A dynamic `ABITuple` writes its offset to `basePtr` instead of `basePtr + offset`, overwriting the first word of the enclosing region (a field, or a sum's tag) | `nix run .#diff` (fixed cases; random cases with `--seed 2`) | Fixed: solcore#620, solcore-rs#90 ([bug001](bugs-found/bug001/README.md)) |
+| 2   | `a7b7afb`   | `SigString` resolution (`std/dispatch.sol`)  | An enum constructor with a `memory<DynArray<t>>` field gets the tag `keccak256("Name(<method>)")`: the `Generic` default `SigString` is picked without a `Generic` instance and signs as the enclosing method's name | `nix run .#diff` (fixed cases)                               | Not present in solcore-rs `f11d56f` (the tag is `keccak256("B(uint256[])")`) ([bug002](bugs-found/bug002/README.md)) |
 
 ## Continuous integration
 
 - `lean_action_ci.yml`: `lake build` on every push and pull request.
 - `solcore_diff.yml`: the fixed cases and 100 random cases (seeded with the run
-  number) against the pinned Solcore on every push and pull request. Weekly and
-  manual runs also test the current Solcore main. The reports go to the job
-  summary, and the reports, regressions and batches are uploaded as artifacts.
+  number) against the pinned solcore-rs and, on manual runs, the current
+  solcore-rs main. Automatic runs are disabled until the model agrees with
+  solcore-rs on the fixed cases. The reports go to the job summary, and the
+  reports, regressions and batches are uploaded as artifacts.

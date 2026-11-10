@@ -1,14 +1,15 @@
-name: Differential test against Solcore
+name: Differential test against solcore-rs
 
 # Automatic runs (push, pull_request and the weekly schedule) are disabled
-# until the fixes for the bugs found by the model are merged into solcore and
-# solcore-rs; until then the workflow only runs when triggered manually.
+# until the model agrees with solcore-rs on the fixed cases (see the README's
+# "Known differences"); until then the workflow only runs when triggered
+# manually.
 on:
   workflow_dispatch:
   # push:
   # pull_request:
   # schedule:
-  #   # weekly, against the current Solcore main (see the `solcore` input below)
+  #   # weekly, against the current solcore-rs main (see the matrix below)
   #   - cron: "0 6 * * 1"
 
 jobs:
@@ -17,8 +18,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # pinned: the Solcore revision in flake.lock (every push / PR);
-        # main: the current Solcore main (scheduled and manual runs only)
+        # pinned: the solcore-rs revision in flake.lock (every push / PR);
+        # main: the current solcore-rs main (scheduled and manual runs only)
         solcore: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["pinned","main"]' || '["pinned"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,7 +30,7 @@ jobs:
         continue-on-error: true
         run: |
           override=()
-          [[ "${{ matrix.solcore }}" == main ]] && override=(--override-input solcore github:argotorg/solcore)
+          [[ "${{ matrix.solcore }}" == main ]] && override=(--override-input solcore-rs github:argotorg/solcore-rs)
           nix run "${override[@]}" .#diff -- --out out/fixed
 
       - name: Random cases
@@ -37,7 +38,7 @@ jobs:
         continue-on-error: true
         run: |
           override=()
-          [[ "${{ matrix.solcore }}" == main ]] && override=(--override-input solcore github:argotorg/solcore)
+          [[ "${{ matrix.solcore }}" == main ]] && override=(--override-input solcore-rs github:argotorg/solcore-rs)
           nix run "${override[@]}" .#diff -- --random --seed "${{ github.run_number }}" --n 100 --out out/random
 
       - name: Report
@@ -54,8 +55,8 @@ jobs:
           path: |
             out/*/report.md
             out/*/regressions/
-            out/*/batches/*.sol
-            out/*/batches/*.json
+            out/*/batches/*/main.sol
+            out/*/batches/*/out.jsonl
 
       - name: Fail on divergence
         if: steps.fixed.outcome == 'failure' || steps.random.outcome == 'failure'
