@@ -37,8 +37,10 @@ theorem Ctors.sizeOf_pos (cs : Ctors) : 0 < sizeOf cs := by
 
 /-!
 An enum `enum n₀ t₀ (cons n₁ t₁ (last n₂ t₂))` has the SOP rep
-`sum<t₀, sum<t₁, t₂>>`; its staticness and head width are those of the rep, as
-solcore's derived `ABIAttribs` instance forwards to `ABIAttribs<rep>`.
+`sum<t₀, sum<t₁, t₂>>`; its staticness is that of the rep. Its head width is
+not: the derived `ABIAttribs` instance (solcore-rs `derived_abi.rs`) reserves a
+single tag word and the widest payload, `1 + max(h₀, h₁, h₂)`, where the rep
+would reserve one tag word per nesting level, `1 + max(h₀, 1 + max(h₁, h₂))`.
 -/
 mutual
 
@@ -73,22 +75,14 @@ def headWords : Ty → Nat
   | .sum a b => if isStatic a && isStatic b then 1 + max (headWords a) (headWords b) else 1
   | .tup a => if isStatic a then headWords a else 1
   | .array _ => 1
-  -- the rep's `headSize`: a static enum reserves `1 + max(h₀, 1 + max(h₁, …))`,
-  -- i.e. one (unused) word per nesting level of the rep, although only one tag
-  -- word is written
-  | .enum _ t cs => if isStatic t && isStaticC cs then 1 + max (headWords t) (headWordsC cs) else 1
+  -- one tag word and the widest payload head (flat, unlike the nested `sum`)
+  | .enum _ t cs => if isStatic t && isStaticC cs then 1 + max (headWords t) (maxArmC cs) else 1
 
-/-- `headWords` of the rep of the remaining constructors (`sum<t₁, sum<…>>`). -/
-def headWordsC : Ctors → Nat
-  | .last _ t => headWords t
-  | .cons _ t cs => if isStatic t && isStaticC cs then 1 + max (headWords t) (headWordsC cs) else 1
-
-end
-
-/-- Widest constructor payload head of the remaining constructors (flat, without
-    the rep's nested tag words). -/
+/-- Widest constructor payload head of the remaining constructors. -/
 def maxArmC : Ctors → Nat
   | .last _ t => headWords t
   | .cons _ t cs => max (headWords t) (maxArmC cs)
+
+end
 
 end AbiModel

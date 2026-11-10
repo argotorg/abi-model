@@ -45,10 +45,10 @@ are relative to the *tag word* (the std's `newBase = tail`, branch at offset 32)
 An `enum` (a derived multi-constructor type) mirrors the derived `ABIEncode`
 (`DeriveGeneric.buildABIEncodeSum` → `encodeVariant`): the same static/dynamic
 layout, but a single `ctorTag` word (`keccak256("Name(argSigs)")`) for the whole
-enum instead of one `0`/`1` word per level of its rep. A static enum is padded
-with zeros to the rep's (nested) `headWords`; a dynamic enum's tail block reserves
-the flat `1 + max` of the payload heads (`_innerHead`). solcore leaves those
-padding words unwritten; the model writes zeros.
+enum instead of one `0`/`1` word per level of its rep. Both a static enum's head
+and a dynamic enum's tail block reserve the tag word and the widest payload head
+(`1 + max`, flat, see `headWords`); the model pads the selected payload with
+zeros to that width.
 -/
 mutual
 
@@ -69,7 +69,7 @@ def encHead : (t : Ty) → Value t → Nat → Wire
   | .enum n t cs, v, tb =>
       if isStatic t && isStaticC cs then
         armTag n t cs v :: (armHead t cs v tb
-          ++ List.replicate (max (headWords t) (headWordsC cs) - armWords t cs v) (0 : Word))
+          ++ List.replicate (max (headWords t) (maxArmC cs) - armWords t cs v) (0 : Word))
       else [natW tb]
   termination_by t => (sizeOf t, 1, 0)
 

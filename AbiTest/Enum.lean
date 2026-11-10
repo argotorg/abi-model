@@ -34,11 +34,12 @@ abbrev S2 : Ty := .enum "P" .word (.last "Q" .word)
 /-- Static, three constructors: `enum E3 { A(uint256), B(uint256), C(uint256, uint256) }`. -/
 abbrev E3 : Ty := .enum "A" .word (.cons "B" .word (.last "C" (.pair .word .word)))
 
--- one tag word, but the rep's nested head width 1 + max(1, 1 + max(1, 2)) = 4
-#guard headWords E3 = 4
+-- one tag word and the widest payload: 1 + max(1, 1, 2) = 3 (solcore-rs's derived
+-- `ABIAttribs`), not the rep's nested 1 + max(1, 1 + max(1, 2)) = 4
+#guard headWords E3 = 3
 #guard encode E3 (Sum.inr (Sum.inr (5, 6))) =
-  [ctorTag "C" (.pair .word .word), 5, 6, 0]
-#guard encode E3 (Sum.inl 7) = [ctorTag "A" .word, 7, 0, 0]
+  [ctorTag "C" (.pair .word .word), 5, 6]
+#guard encode E3 (Sum.inl 7) = [ctorTag "A" .word, 7, 0]
 #guard rt E3 (Sum.inr (Sum.inl 7))
 #guard rt E3 (Sum.inr (Sum.inr (5, 6)))
 
@@ -61,7 +62,7 @@ abbrev Opt : Ty := .enum "None" .unit (.last "Some" .word)
 
 -- the last constructor is the default for an unknown tag (lenient, like solcore)
 #guard decode S2 [12345, 8] = (Sum.inr 8 : Value S2)
-#guard decode E3 [12345, 5, 6, 0] = (Sum.inr (Sum.inr (5, 6)) : Value E3)
+#guard decode E3 [12345, 5, 6] = (Sum.inr (Sum.inr (5, 6)) : Value E3)
 
 -- enums nested in arrays, pairs and other enums (an enum field signs as its rep)
 #guard rt (.array D3) [Sum.inr (Sum.inl [1, 2]), Sum.inl 3, Sum.inr (Sum.inr 4)]
@@ -78,7 +79,7 @@ abbrev Opt : Ty := .enum "None" .unit (.last "Some" .word)
   [.off, .tag, .off, .len, .data, .data]
 -- a static enum has no offsets; the fill up to the rep's head width is padding
 #guard encodeBytes E3 (Sum.inl 7) = encode E3 (Sum.inl 7)
-#guard (encodeAnn 32 E3 (Sum.inl 7)).map (·.role) = [.tag, .data, .pad, .pad]
+#guard (encodeAnn 32 E3 (Sum.inl 7)).map (·.role) = [.tag, .data, .pad]
 #guard (encodeAnn 32 Opt (Sum.inl ())).map (·.role) = [.tag, .pad]
 
 end AbiModel

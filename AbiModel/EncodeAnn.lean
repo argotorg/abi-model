@@ -42,7 +42,7 @@ def annHead (sc : Nat) : (t : Ty) → Value t → Nat → List Cell
   | .enum n t cs, v, tb =>
       if isStatic t && isStaticC cs then
         ⟨.tag, armTag n t cs v⟩ :: (annArmHead sc t cs v tb
-          ++ List.replicate (max (headWords t) (headWordsC cs) - armWords t cs v) ⟨.pad, 0⟩)
+          ++ List.replicate (max (headWords t) (maxArmC cs) - armWords t cs v) ⟨.pad, 0⟩)
       else [⟨.off, natW (sc * tb)⟩]
   termination_by t => (sizeOf t, 1, 0)
 

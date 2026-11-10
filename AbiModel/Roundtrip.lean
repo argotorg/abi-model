@@ -20,7 +20,7 @@ assumption about the hash's values on the signatures that actually occur (see
 
 /-! ### The selected enum constructor: head width and tag -/
 
-/-- The selected payload head fits the flat widest payload (dynamic layout). -/
+/-- The selected payload head fits the widest payload head. -/
 theorem armWords_le_maxArm : ∀ (t : Ty) (cs : Ctors) (v : Value t ⊕ ValueC cs),
     armWords t cs v ≤ max (headWords t) (maxArmC cs)
   | _, _, .inl _ => by simp only [armWords]; omega
@@ -28,17 +28,6 @@ theorem armWords_le_maxArm : ∀ (t : Ty) (cs : Ctors) (v : Value t ⊕ ValueC c
       have := armWords_le_maxArm u cs y
       simp only [armWords, maxArmC]; omega
   | _, .last _ _, .inr _ => by simp only [armWords, maxArmC]; omega
-  termination_by _ cs => sizeOf cs
-
-/-- The selected payload head fits the rep's (nested) width (static layout). -/
-theorem armWords_le_headWordsC : ∀ (t : Ty) (cs : Ctors) (v : Value t ⊕ ValueC cs),
-    isStaticC cs = true → armWords t cs v ≤ max (headWords t) (headWordsC cs)
-  | _, _, .inl _, _ => by simp only [armWords]; omega
-  | _, .cons _ u cs, .inr y, h => by
-      have hs : isStatic u = true ∧ isStaticC cs = true := by simpa [isStaticC] using h
-      have := armWords_le_headWordsC u cs y hs.2
-      simp only [armWords, headWordsC, hs.1, hs.2, Bool.and_self, if_true]; omega
-  | _, .last _ _, .inr _, _ => by simp only [armWords, headWordsC]; omega
   termination_by _ cs => sizeOf cs
 
 /-- The written tag is one of the enum's constructor tags. -/
@@ -100,7 +89,7 @@ theorem encHead_length : ∀ (t : Ty) (v : Value t) (tb : Nat),
       intro v tb
       by_cases hs : (isStatic t && isStaticC cs) = true
       · have hl := armHead_length t cs v tb
-        have hle := armWords_le_headWordsC t cs v (by simp only [Bool.and_eq_true] at hs; exact hs.2)
+        have hle := armWords_le_maxArm t cs v
         simp [encHead, headWords, hs, hl]; omega
       · simp only [Bool.not_eq_true] at hs
         simp [encHead, headWords, hs]
@@ -378,13 +367,13 @@ theorem decAt_static : ∀ (t : Ty), isStatic t = true →
       have hf := Fits_enum hfit
       have hhead : encHead (Ty.enum n t cs) v (headWords (Ty.enum n t cs))
           = armTag n t cs v :: (armHead t cs v (headWords (Ty.enum n t cs))
-              ++ List.replicate (max (headWords t) (headWordsC cs) - armWords t cs v) 0) := by
+              ++ List.replicate (max (headWords t) (maxArmC cs) - armWords t cs v) 0) := by
         simp only [encHead]; rw [if_pos hs]
       rw [hhead] at hp
       have htag : rd W (base + ho) = armTag n t cs v := rd_of_drop (by simpa using hp)
       have hpa : W.drop (base + (ho + 1))
           = armHead t cs v (headWords (Ty.enum n t cs))
-            ++ (List.replicate (max (headWords t) (headWordsC cs) - armWords t cs v) 0 ++ suf) := by
+            ++ (List.replicate (max (headWords t) (maxArmC cs) - armWords t cs v) 0 ++ suf) := by
         have hd := drop_add_length W (base + ho) [armTag n t cs v] _ (by simpa using hp)
         simpa [Nat.add_assoc] using hd
       simp only [decAt]; rw [if_pos hs, htag]
