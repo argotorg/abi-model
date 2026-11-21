@@ -68,7 +68,18 @@ namespace AbiModel
 def bytesIs (t : Ty) (v : Value t) (expected : List Nat) : Bool :=
   (encodeBytes t v).map (·.toNat) == expected
 
--- static product: same as `encPoint(3,4)` in solcore's abi_encode_adt.json
+-- array elements follow `ABIElement`: a dynamic product element is behind one
+-- offset word (the layout solcore-rs's `calldata<array<(uint256, uint256[])>>`
+-- accepts), a static one is inline
+#guard bytesIs (.array (.pair .word (.array .word)))
+  ([(7, [1, 2]), (8, [3])] : List (Word × List Word))
+  [0x20, 2, 0x40, 0xe0, 7, 0x40, 2, 1, 2, 8, 0x40, 1, 3]
+#guard bytesIs (.array (.pair .word .word)) ([(5, 6), (7, 8)] : List (Word × Word))
+  [0x20, 2, 5, 6, 7, 8]
+#guard rt (.array (.pair .word (.array .word))) [(7, [1, 2]), (8, [3])]
+#guard rt (.array (.pair (.array .word) (.pair .word (.array .word)))) [([1], (2, [3, 4])), ([], (5, []))]
+
+-- static product: same as `encPoint(3,4)` in solcore-rs's `tests/e2e/abi-encode-adt`
 #guard bytesIs (.pair .word .word) ((3, 4) : Word × Word) [3, 4]
 -- offsets become byte offsets, lengths stay counts
 #guard bytesIs (.pair .word (.array .word)) ((9, [5, 6]) : Word × List Word) [9, 0x40, 2, 5, 6]

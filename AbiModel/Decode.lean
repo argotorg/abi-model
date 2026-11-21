@@ -62,13 +62,23 @@ def decArm : (n : String) → (t : Ty) → (cs : Ctors) → Wire → Nat → Nat
   termination_by _ t cs => (sizeOf t + sizeOf cs, 0, 0)
   decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
 
+/-- Decode an array element whose head is at `base + ho` (`encElemHead`): a
+    dynamic product element is behind an offset word, relative to `base`, to
+    its own head; any other element is decoded in place. -/
+def decElem : (a : Ty) → Wire → Nat → Nat → Value a
+  | .pair a b, W, base, ho =>
+      if isStatic a && isStatic b then decAt (.pair a b) W base ho
+      else decAt (.pair a b) W (base + (rd W (base + ho)).toNat) 0
+  | t, W, base, ho => decAt t W base ho
+  termination_by a => (sizeOf a, 1, 1)
+
 /-- Decode `n` array elements from an element region starting at `region`.
-    Element `i`'s head sits at `region + i * headWords a` (inline for a static
+    Element `i`'s head sits at `region + i * elemWords a` (inline for a static
     element type; an offset word into the element's own tail for a dynamic one,
-    which `decAt` then follows). -/
+    which `decElem` then follows). -/
 def decSeq : (a : Ty) → Wire → Nat → Nat → Nat → List (Value a)
   | _, _, _, 0, _ => []
-  | a, W, region, k + 1, i => decAt a W region (i * headWords a) :: decSeq a W region k (i + 1)
+  | a, W, region, k + 1, i => decElem a W region (i * elemWords a) :: decSeq a W region k (i + 1)
   termination_by a _ _ n => (sizeOf a, 2, n)
 
 end

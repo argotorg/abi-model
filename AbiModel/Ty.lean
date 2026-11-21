@@ -86,4 +86,12 @@ def maxArmC : Ctors → Nat
 
 end
 
+/-- Width of an array element's head: `ABIElementAttribs.headSize` of solcore-rs
+    (`std/std.sol`, `ABIElement`). An element is laid out as one ABI value: a
+    product element uses `ABITuple`'s layout, inline when static and a single
+    offset word when dynamic; any other element type uses its own head. -/
+def elemWords : Ty → Nat
+  | .pair a b => if isStatic a && isStatic b then headWords a + headWords b else 1
+  | t => headWords t
+
 end AbiModel

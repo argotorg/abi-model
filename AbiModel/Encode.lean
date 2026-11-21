@@ -88,7 +88,7 @@ def encTail : (t : Ty) → Value t → Wire
               ++ List.replicate (padR a b) (0 : Word) ++ encTail b y)
   | .tup a, v => if isStatic a then [] else (encHead a v (headWords a) ++ encTail a v)
   | .array a, xs =>
-      natW xs.length :: (encHeadSeq a xs (xs.length * headWords a) ++ encTailSeq a xs)
+      natW xs.length :: (encHeadSeq a xs (xs.length * elemWords a) ++ encTailSeq a xs)
   | .enum n t cs, v =>
       if isStatic t && isStaticC cs then []
       else
@@ -113,18 +113,34 @@ def armTail : (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → Wire
   termination_by t cs => (sizeOf t + sizeOf cs, 0, 0)
   decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
 
+/-- The head of an array element (solcore-rs's `ABIElement`): a product element
+    is laid out as an `ABITuple`, inline when static and a single offset word
+    (to its own head and tail) when dynamic; any other element as itself. -/
+def encElemHead : (a : Ty) → Value a → Nat → Wire
+  | .pair a b, x, tb => if isStatic a && isStatic b then encHead (.pair a b) x tb else [natW tb]
+  | t, x, tb => encHead t x tb
+  termination_by a => (sizeOf a, 1, 1)
+
+/-- The tail of an array element (see `encElemHead`). -/
+def encElemTail : (a : Ty) → Value a → Wire
+  | .pair a b, x =>
+      if isStatic a && isStatic b then encTail (.pair a b) x
+      else encHead (.pair a b) x (headWords a + headWords b) ++ encTail (.pair a b) x
+  | t, x => encTail t x
+  termination_by a => (sizeOf a, 1, 1)
+
 /-- Element *heads* of an array, threading the tail cursor `tb`. For a static
     element type this is the inline element encoding; for a dynamic one it is the
     per-element offset table. -/
 def encHeadSeq : (a : Ty) → List (Value a) → Nat → Wire
   | _, [], _ => []
-  | a, x :: xs, tb => encHead a x tb ++ encHeadSeq a xs (tb + (encTail a x).length)
+  | a, x :: xs, tb => encElemHead a x tb ++ encHeadSeq a xs (tb + (encElemTail a x).length)
   termination_by a xs => (sizeOf a, 2, xs.length)
 
 /-- Element *tails* of an array (empty when the element type is static). -/
 def encTailSeq : (a : Ty) → List (Value a) → Wire
   | _, [] => []
-  | a, x :: xs => encTail a x ++ encTailSeq a xs
+  | a, x :: xs => encElemTail a x ++ encTailSeq a xs
   termination_by a xs => (sizeOf a, 2, xs.length)
 
 end

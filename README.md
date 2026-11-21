@@ -41,6 +41,11 @@ Encoding is **head/tail canonical**, aligned with the std `ABIEncode.encodeInto`
   word** into the head. The offset points at the node's block in the shared
   tail. An array of dynamic elements gets an inner offset table, like the std
   `abiArrayGet`.
+- An array element is laid out as one ABI value (solcore-rs's `ABIElement`,
+  `elemWords`): a product element uses `ABITuple`'s layout, inline when static
+  and a single offset word when dynamic, so `(uint256, uint256[])[]` has one
+  offset per element, as `calldata<array<(uint256, uint256[])>>` expects
+  (checked on the EVM; the wire is a `#guard` in `AbiModel/Sanity.lean`).
 - A static `sum` writes `[tag | branch]`, padded to the widest branch. A static
   enum writes `[tag | payload]`, padded to the widest payload.
 - A dynamic `sum` puts the same padded `[tag | branch head]` block in the tail,

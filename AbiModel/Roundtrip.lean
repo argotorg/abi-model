@@ -445,6 +445,19 @@ theorem decodeAll_encode_static (t : Ty) (hst : isStatic t = true) (v : Value t)
 theorem rd_shift (pre W : Wire) (k : Nat) : rd (pre ++ W) (pre.length + k) = rd W k := by
   simp [rd, List.getD_eq_getElem?_getD, List.getElem?_append_right]
 
+/-- `decElem` is base-relative, given that `decAt` is at the element type. -/
+theorem decElem_shift_of (a : Ty)
+    (IH : ∀ (pre W : Wire) (base ho : Nat), decAt a (pre ++ W) (pre.length + base) ho = decAt a W base ho)
+    (pre W : Wire) (base ho : Nat) :
+    decElem a (pre ++ W) (pre.length + base) ho = decElem a W base ho := by
+  cases a
+  case pair a b =>
+    simp only [decElem]
+    split
+    · exact IH pre W base ho
+    · simp only [Nat.add_assoc, rd_shift, IH]
+  all_goals (simp only [decElem]; try exact IH pre W base ho)
+
 mutual
 
 /-- The decoder is base-relative: prepending `pre` to the wire and shifting the
@@ -465,7 +478,7 @@ theorem decAt_shift : ∀ (t : Ty) (pre W : Wire) (base ho : Nat),
         intro pre W region n
         induction n with
         | zero => intro i; simp only [decSeq]
-        | succ k ih => intro i; simp only [decSeq, decAt_shift a, ih]
+        | succ k ih => intro i; simp only [decSeq, decElem_shift_of a (decAt_shift a), ih]
       intro pre W base ho; simp only [decAt, Nat.add_assoc, rd_shift, hseq]
   | .enum n t cs => by
       intro pre W base ho
@@ -504,15 +517,24 @@ theorem headWords_pos_of_dynamic : ∀ (t : Ty), isStatic t = false → 0 < head
   | .enum n t cs => by intro _; simp only [headWords]; split <;> omega
   termination_by t => sizeOf t
 
-/-- The element heads of an array occupy `length × headWords a` words. -/
+/-- An element's head occupies `elemWords a` words. -/
+theorem encElemHead_length (a : Ty) (x : Value a) (tb : Nat) :
+    (encElemHead a x tb).length = elemWords a := by
+  cases a
+  case pair a b =>
+    simp only [encElemHead, elemWords]
+    split <;> simp [encHead_length, headWords]
+  all_goals (simp only [encElemHead, elemWords]; exact encHead_length _ x tb)
+
+/-- The element heads of an array occupy `length × elemWords a` words. -/
 theorem encHeadSeq_length (a : Ty) : ∀ (xs : List (Value a)) (tb : Nat),
-    (encHeadSeq a xs tb).length = xs.length * headWords a := by
+    (encHeadSeq a xs tb).length = xs.length * elemWords a := by
   intro xs
   induction xs with
   | nil => intro tb; simp [encHeadSeq]
   | cons x xs ih =>
       intro tb
-      simp only [encHeadSeq, List.length_append, encHead_length, ih, List.length_cons,
+      simp only [encHeadSeq, List.length_append, encElemHead_length, ih, List.length_cons,
         Nat.succ_mul]
       omega
 
@@ -527,6 +549,43 @@ theorem lt_length_of_drop {W : Wire} {k : Nat} {l r : Wire}
 
 theorem natW_toNat {n : Nat} (h : n < 2 ^ 256) : (natW n).toNat = n := by
   simp [natW, Nat.mod_eq_of_lt h]
+
+/-- Placement for an array element, given placement at the element type: a
+    dynamic product element is found behind its offset word, any other in place. -/
+theorem decElem_place_of (a : Ty)
+    (IH : ∀ (v : Value a) (W : Wire) (base ho tb : Nat) (s1 s2 : Wire),
+      Fits a v → W.length < 2 ^ 256 →
+      W.drop (base + ho) = encHead a v tb ++ s1 → W.drop (base + tb) = encTail a v ++ s2 →
+      decAt a W base ho = v)
+    (x : Value a) (W : Wire) (base ho tb : Nat) (s1 s2 : Wire)
+    (hfit : Fits a x) (hlen : W.length < 2 ^ 256)
+    (hp : W.drop (base + ho) = encElemHead a x tb ++ s1)
+    (ht : W.drop (base + tb) = encElemTail a x ++ s2) :
+    decElem a W base ho = x := by
+  cases a
+  case pair a b =>
+    simp only [encElemHead, encElemTail] at hp ht
+    simp only [decElem]
+    by_cases hs : (isStatic a && isStatic b) = true
+    · simp only [hs, if_true] at hp ht ⊢
+      exact IH x W base ho tb s1 s2 hfit hlen hp ht
+    · simp only [Bool.not_eq_true] at hs
+      simp only [hs, Bool.false_eq_true, if_false, List.append_assoc] at hp ht ⊢
+      have hdyn : isStatic (Ty.pair a b) = false := by simpa [isStatic] using hs
+      have hlt : base + tb < W.length := lt_length_of_drop ht
+        (by rw [encHead_length]; exact headWords_pos_of_dynamic _ hdyn)
+      have hoff : (rd W (base + ho)).toNat = tb := by
+        rw [rd_of_drop (by simpa using hp), natW_toNat (by omega)]
+      have htb : W.drop (base + tb + (headWords a + headWords b)) = encTail (.pair a b) x ++ s2 := by
+        have hd := drop_add_length W _ _ _ ht
+        rw [encHead_length] at hd
+        exact hd
+      rw [hoff]
+      exact IH x W (base + tb) 0 _ _ _ hfit hlen (by simpa using ht) htb
+  all_goals
+    simp only [encElemHead, encElemTail] at hp ht
+    simp only [decElem]
+    try exact IH x W base ho tb s1 s2 hfit hlen hp ht
 
 mutual
 
@@ -643,7 +702,7 @@ theorem decAt_place : ∀ (t : Ty) (v : Value t) (W : Wire) (base ho tb : Nat) (
       intro v W base ho tb s1 s2 hfit hlen hp ht
       have hseq : ∀ (xs : List (Value a)) (region i tb' : Nat) (s1' s2' : Wire),
           (∀ x ∈ xs, Fits a x) →
-          W.drop (region + i * headWords a) = encHeadSeq a xs tb' ++ s1' →
+          W.drop (region + i * elemWords a) = encHeadSeq a xs tb' ++ s1' →
           W.drop (region + tb') = encTailSeq a xs ++ s2' →
           decSeq a W region xs.length i = xs := by
         intro xs
@@ -653,17 +712,17 @@ theorem decAt_place : ∀ (t : Ty) (v : Value t) (W : Wire) (base ho tb : Nat) (
             intro region i tb' s1' s2' hf hph hpt
             simp only [encHeadSeq, List.append_assoc] at hph
             simp only [encTailSeq, List.append_assoc] at hpt
-            have hx := decAt_place a x W region (i * headWords a) tb' _ _ (hf x (by simp)) hlen
-              hph hpt
+            have hx := decElem_place_of a (decAt_place a) x W region (i * elemWords a) tb' _ _
+              (hf x (by simp)) hlen hph hpt
             have hph2 := drop_add_length W _ _ _ hph
-            rw [encHead_length, Nat.add_assoc, ← Nat.succ_mul] at hph2
+            rw [encElemHead_length, Nat.add_assoc, ← Nat.succ_mul] at hph2
             have hpt2 := drop_add_length W _ _ _ hpt
             rw [Nat.add_assoc] at hpt2
             have hrest := ih region (i + 1) _ _ _ (fun y hy => hf y (by simp [hy])) hph2 hpt2
             simp only [List.length_cons, decSeq, hx, hrest]
       have hp' : W.drop (base + ho) = natW tb :: s1 := by simpa [encHead] using hp
       have ht' : W.drop (base + tb) = [natW v.length]
-          ++ (encHeadSeq a v (v.length * headWords a) ++ (encTailSeq a v ++ s2)) := by
+          ++ (encHeadSeq a v (v.length * elemWords a) ++ (encTailSeq a v ++ s2)) := by
         simpa [encTail] using ht
       have hlt : base + tb < W.length := lt_length_of_drop ht' (by simp)
       have hoff : (rd W (base + ho)).toNat = tb := by
