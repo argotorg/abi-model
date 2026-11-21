@@ -7,4 +7,5 @@ import AbiModel.Decode
 import AbiModel.Check
 import AbiModel.Roundtrip
 import AbiModel.EncodeAnn
+import AbiModel.DecodeStrict
 import AbiModel.FFI.Keccak

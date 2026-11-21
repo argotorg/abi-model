@@ -58,9 +58,39 @@ Offsets are **word-indexed** in `encode`; the std's byte offset is `32 ×` this.
 equal to `encode` at unit scale (`encodeAnn_one`), and the wire with every offset
 word `× 32` at byte scale (`encodeBytes_eq`, `encodeBytes_length`).
 
-The decoder is base-relative (it follows offsets), total (out-of-bounds reads
-give `0`) and **lenient** on tags like the real one: `tag = 0` means `inl`, any
-other value means `inr`.
+The decoder (`AbiModel/Decode.lean`) is base-relative (it follows offsets),
+total (out-of-bounds reads give `0`) and **lenient**: as in solcore-rs, a `sum`
+tag `0` means `inl` and any other value `inr`, but where solcore-rs reverts
+(truncated input, a `bool` word above `1`, an unknown enum tag) it returns a
+value. It is an abstraction of solcore-rs's decoder that agrees with it on
+canonical input.
+
+The **strict decoder** `decStrict` (`AbiModel/DecodeStrict.lean`) follows
+solcore-rs's calldata decoder step by step, at the byte level. It reads through
+a bounded reader (any read or advance past `calldatasize` is
+`ABIInputTruncated`, `0x08638556`), checks that the head fits before decoding
+(`do_exec`), rejects a `bool` word above `1` (`0x0557dbbf`), an unknown enum tag
+(`absurd`, an empty revert) and array lengths whose byte size would wrap. It
+accepts what solcore-rs accepts: offsets are arbitrary (non-canonical,
+unaligned, shared), padding and trailing bytes are not checked, and any nonzero
+`sum` tag is `inr`. Its `#guard`s are in `AbiTest/Strict.lean`; it is the oracle
+of the mutated-calldata calls of the differential test, and
+`decStrict_encodeBytes` proves that it accepts every canonical encoding.
+
+### Differences from the Haskell Solcore
+
+The model first followed the Haskell Solcore
+([argotorg/solcore](https://github.com/argotorg/solcore)), whose ABI differs
+from solcore-rs in three places (compared at `b1161992`):
+
+- **Static enum width.** Its derived `ABIAttribs` forwards to the rep, so a
+  static enum reserves `1 + max(h₀, 1 + max(h₁, …))`, one unused word per
+  nesting level. solcore-rs reserves `1 + max(h₀, h₁, …)`, which the model now
+  follows; enums with three or more constructors encode differently.
+- **Padding.** solcore-rs zeroes the padding after a short sum branch or enum
+  payload (`zeroize_memory`); the Haskell std leaves memory as it was.
+- **Unknown enum tags.** The Haskell decoder takes the last constructor as the
+  default; solcore-rs reverts.
 
 
 ## The theorems and the checks
@@ -165,6 +195,7 @@ FFI `keccak256` against OpenSSL known answers. The whole project builds with
 | `AbiModel/Encode.lean`     | head/tail `encode` with word offsets (`encHead`/`encTail`)       |
 | `AbiModel/EncodeAnn.lean`  | byte-offset encoder with word roles (`encodeBytes`)              |
 | `AbiModel/Decode.lean`     | base-relative `decode` following offsets (`decAt`/`decSeq`)      |
+| `AbiModel/DecodeStrict.lean` | byte-level strict decoder `decStrict`, as solcore-rs's         |
 | `AbiModel/Check.lean`      | `rt`/`wireIs` Boolean checks used by the `#guard`s               |
 | `AbiModel/Roundtrip.lean`  | round-trip theorems (T1), static and dynamic, and their lemmas   |
 | `AbiModel/Sanity.lean`     | `#guard` round-trip and exact-wire battery                       |
@@ -172,6 +203,7 @@ FFI `keccak256` against OpenSSL known answers. The whole project builds with
 | `c/ffi.c`, `c/sha3/`       | C glue and the vendored SHA3IUF Keccak implementation            |
 | `AbiTest/Keccak.lean`      | Keccak known-answer `#guard`s (`precompileModules`)              |
 | `AbiTest/Enum.lean`        | enum `#guard`s: tags, wires, round trips (`precompileModules`)   |
+| `AbiTest/Strict.lean`      | `decStrict` `#guard`s: canonical input, reverts, accepted input  |
 | `AbiDiff/Solc.lean`        | renders cases as a solcore-rs contract with E2E directives      |
 | `AbiDiff/Cases.lean`       | hand-picked cases, one per layout rule                           |
 | `AbiDiff/Gen.lean`         | Plausible generators and shrinkers for random cases              |

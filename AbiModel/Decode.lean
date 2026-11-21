@@ -7,13 +7,22 @@ namespace AbiModel
 def rd (W : Wire) (i : Nat) : Word := W.getD i 0
 
 /-!
-Base-relative canonical decoder, aligned with the std `ABIDecode` / word readers
-(`std/std.sol:1524,1679,1757`). `decAt t W base ho` reads the value of type `t`
-whose head sits at absolute index `base + ho` in `W`, following offset words into
-the shared tail exactly as `abiArrayGet` / the dynamic-sum decoder do. Reads are
-total (`rd`), so the decoder is total; it stays *lenient* on tags (any nonzero `sum` tag
-word decodes as the right injection, an unknown `enum` tag as its last
-constructor, a nonzero bool word as `true`), matching the real decoder.
+Base-relative *lenient* decoder, the word-level counterpart of the std's
+`ABIDecode` instances (solcore-rs `std/std.sol`, `std/ABIGeneric.sol`).
+`decAt t W base ho` reads the value of type `t` whose head sits at absolute index
+`base + ho` in `W`, following offset words into the shared tail as the std's
+array and dynamic-sum decoders do.
+
+It is an abstraction of solcore-rs's decoder, not a copy: reads are total
+(`rd`), so the decoder is total, and it is lenient where solcore-rs reverts. A
+read past the end gives `0` (solcore-rs: `ABIInputTruncated`), a nonzero bool
+word decodes as `true` (solcore-rs: `DirtyHigherBitsForBool` unless it is `1`),
+and an unknown `enum` tag as its last constructor (solcore-rs: revert). As in
+solcore-rs, any nonzero `sum` tag decodes as the right injection. On canonical
+input the two agree (`decode_encode_fits`, and the differential echo calls);
+the strict, byte-level decoder that follows solcore-rs is `decStrict`, and
+`decLax` is this decoder's semantics at the byte level, which `decStrict`
+refines (`decStrict_refines`).
 -/
 mutual
 

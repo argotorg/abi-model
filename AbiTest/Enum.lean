@@ -60,7 +60,8 @@ abbrev Opt : Ty := .enum "None" .unit (.last "Some" .word)
 #guard encode Opt (Sum.inl ()) = [FFI.keccakString "None()", 0]
 #guard rt Opt (Sum.inl ())
 
--- the last constructor is the default for an unknown tag (lenient, like solcore)
+-- the lenient decoder takes the last constructor for an unknown tag (solcore-rs
+-- reverts; see `decStrict`)
 #guard decode S2 [12345, 8] = (Sum.inr 8 : Value S2)
 #guard decode E3 [12345, 5, 6] = (Sum.inr (Sum.inr (5, 6)) : Value E3)
 
