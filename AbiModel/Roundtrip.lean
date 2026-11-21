@@ -190,8 +190,10 @@ end
 
 mutual
 
-/-- Side conditions for the round trip: every array length fits in a word
-    (without it, e.g. an `array unit` of length `2^256` encodes its length as `0`),
+/-- Side conditions for the round trip: every array length is below
+    `2^251 - 1`, solcore-rs's bound `length < ~0 / 32` (a longer array is
+    rejected by its decoder; and without a bound that keeps the length in a
+    word, e.g. an `array unit` of length `2^256` encodes its length as `0`),
     and every enum on the value's path has pairwise-distinct constructor tags
     (without it, e.g. `enum "A" word (last "A" word)` decodes `inr 5` as `inl 5`).
 
@@ -214,7 +216,7 @@ def Fits : (t : Ty) → Value t → Prop
       | .inl x => Fits a x
       | .inr y => Fits b y
   | .tup a, v => Fits a v
-  | .array a, xs => xs.length < 2 ^ 256 ∧ ∀ x ∈ xs, Fits a x
+  | .array a, xs => xs.length < 2 ^ 251 - 1 ∧ ∀ x ∈ xs, Fits a x
   | .enum n t cs, v => (ctorTag n t :: tagsC cs).Nodup ∧ match v with
       | .inl x => Fits t x
       | .inr y => FitsC cs y
@@ -728,7 +730,7 @@ theorem decAt_place : ∀ (t : Ty) (v : Value t) (W : Wire) (base ho tb : Nat) (
       have hoff : (rd W (base + ho)).toNat = tb := by
         rw [rd_of_drop hp', natW_toNat (by omega)]
       have hlenw : (rd W (base + tb)).toNat = v.length := by
-        rw [rd_of_drop (by simpa using ht'), natW_toNat hfit.1]
+        rw [rd_of_drop (by simpa using ht'), natW_toNat (Nat.lt_trans hfit.1 (by decide))]
       have hh := drop_add_length W _ _ _ ht'
       have ht2 := drop_add_length W _ _ _ hh
       rw [encHeadSeq_length, List.length_singleton] at ht2
@@ -816,8 +818,8 @@ theorem decArm_place : ∀ (n : String) (t : Ty) (cs : Ctors) (v : Value t ⊕ V
 
 end
 
-/-- Retraction under the side conditions: `Fits t v` (array lengths fit in a
-    word, enum constructor tags are distinct) and the whole encoding fits in a word.
+/-- Retraction under the side conditions: `Fits t v` (array lengths below
+    solcore-rs's bound, enum constructor tags are distinct) and the whole encoding fits in a word.
 
     The length bound `hlen` is what makes offsets faithful: a dynamic node writes
     its tail position `tb` as `natW tb` (i.e. `tb mod 2^256`) and the decoder reads

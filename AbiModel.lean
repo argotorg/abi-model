@@ -8,4 +8,5 @@ import AbiModel.Check
 import AbiModel.Roundtrip
 import AbiModel.EncodeAnn
 import AbiModel.DecodeStrict
+import AbiModel.RoundtripStrict
 import AbiModel.FFI.Keccak

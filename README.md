@@ -126,10 +126,62 @@ needs no tail. Both rest on the structural lemmas `encHead_length`,
 invariant under prepending a prefix and shifting the base). The enum cases go
 through the per-constructor `arm*_of` lemmas.
 
+`AbiModel/RoundtripStrict.lean` proves the same law for the strict, byte-level
+decoder: solcore-rs's decoder, run on the byte-level encoding of `v` as a public
+method's arguments, succeeds with `v`. None of its checks fires on canonical
+input (every read is in bounds, every bool word is `0`/`1`, every enum tag is a
+constructor's, every array length passes the overflow checks):
+
+```lean
+theorem decStrict_encodeBytes (t : Ty) (v : Value t) (hfit : Fits t v)
+    (hlen : 32 * (encode t v).length < 2 ^ 256) :
+    decStrict t (Input.ofWire (encodeBytes t v)) = .ok v
+```
+
+Its placement lemma `decS_place` is `decAt_place` at the byte level: heads and
+tails at byte scale (`annHead 32`, offsets in bytes), positions `32 ×` word
+indices, and every read and advance shown to be within the input. The length
+bound is in bytes, since the byte offsets must not wrap.
+
+The decoder is also **stable**: whatever it returns, from any input, canonical
+or not, re-encodes into input it accepts and decodes back to the same value.
+
+```lean
+theorem decStrict_stable {t : Ty} {I : Input} {v : Value t} (htags : TagsOK t)
+    (h : decStrict t I = .ok v) (hlen : 32 * (encode t v).length < 2 ^ 256) :
+    decStrict t (Input.ofWire (encodeBytes t v)) = .ok v
+```
+
+It rests on `decStrict_fits`: a decoded value satisfies `Fits`, because the
+decoder itself rejects array lengths at or above `~0 / 32`. Two hypotheses
+remain. `TagsOK t` (every enum in the type has distinct constructor tags) is a
+property of the type, where `Fits` states it for the enums on a value's path.
+And the re-encoding must fit in a word: offsets in the input may be shared
+(several heads pointing at one tail), so a decoded value's canonical encoding
+can be much larger than the input it came from.
+
+Finally, the strict decoder **refines** the lenient one. `decLax`
+(`AbiModel/DecodeStrict.lean`) is `decode`'s semantics on the byte-level input:
+total reads, a nonzero bool is `true`, a nonzero sum tag is `inr`, an unknown
+enum tag is the last constructor. Where `decStrict` succeeds, `decLax` returns
+the same value, so `decStrict` is `decLax` with checks added; on canonical
+input all three decoders agree (`decoders_agree`).
+
+```lean
+theorem decStrict_refines {t : Ty} {I : Input} {v : Value t}
+    (h : decStrict t I = .ok v) : decLax t I 0 0 = v
+```
+
+The refinement is stated against `decLax` rather than the word-level `decode`
+because on arbitrary input the two do not read the same offsets: `decode` takes
+an offset word as a word index, the byte-level decoders as a byte count, and
+only the encoding's structure says which words are offsets.
+
 ### Side conditions
 
-`Fits t v` collects the value-level side conditions: array lengths fit in a word,
-and every enum on the value's path has pairwise-distinct constructor tags (without
+`Fits t v` collects the value-level side conditions: array lengths are below
+`2^251 - 1`, solcore-rs's decoder bound `length < ~0 / 32` (which also keeps
+them in a word), and every enum on the value's path has pairwise-distinct constructor tags (without
 it, e.g. `enum "A" word (last "A" word)` decodes `inr 5` as `inl 5`).
 
 The general and dynamic theorems additionally assume
@@ -198,6 +250,7 @@ FFI `keccak256` against OpenSSL known answers. The whole project builds with
 | `AbiModel/DecodeStrict.lean` | byte-level strict decoder `decStrict`, as solcore-rs's         |
 | `AbiModel/Check.lean`      | `rt`/`wireIs` Boolean checks used by the `#guard`s               |
 | `AbiModel/Roundtrip.lean`  | round-trip theorems (T1), static and dynamic, and their lemmas   |
+| `AbiModel/RoundtripStrict.lean` | `decStrict` accepts the canonical encoding, and is stable (`decStrict_encodeBytes`, `decStrict_stable`) |
 | `AbiModel/Sanity.lean`     | `#guard` round-trip and exact-wire battery                       |
 | `AbiModel/FFI/Keccak.lean` | `keccak256` via FFI (`keccakWord`, `selector`)                   |
 | `c/ffi.c`, `c/sha3/`       | C glue and the vendored SHA3IUF Keccak implementation            |
