@@ -14,6 +14,8 @@ open Lean
 inductive Check where
   | encode
   | echo
+  /-- The echo call on mutated calldata, which must do what `decStrict` does. -/
+  | mutant (label : String) (expectSuccess : Bool) (expected : String)
 deriving BEq
 
 inductive Outcome where
@@ -58,16 +60,26 @@ def parseResults (s : String) : Except String (List CallResult) :=
 
 /-- Compare one call's result with the model's prediction. -/
 def judge (check : Check) (call : Call) (r : CallResult) : Outcome :=
-  if r.status != "success" then
-    .diverge check "failure" s!"reverted with `0x{r.returndata}` ({r.message})"
-  else if r.returndata.toLower == call.returndata then .agree
-  else .diverge check r.returndata "returned other bytes than the model predicts"
+  let ok := r.status == "success"
+  if ok && call.success then
+    if r.returndata.toLower == call.returndata then .agree
+    else .diverge check r.returndata "returned other bytes than the model predicts"
+  else if !ok && !call.success then
+    if r.returndata.toLower == call.returndata then .agree
+    else .diverge check s!"revert:{r.returndata}"
+      s!"reverted with `0x{r.returndata}` where the model reverts with `0x{call.returndata}`"
+  else if ok then
+    .diverge check r.returndata s!"succeeded where the model reverts with `0x{call.returndata}`"
+  else .diverge check "failure" s!"reverted with `0x{r.returndata}` ({r.message})"
 
 /-- The outcome of case `i` from the results of its calls (`Case.calls`): the
     first divergence, encoder first. -/
 def judgeCase (i : Nat) (c : Case) (rs : List CallResult) : Outcome :=
-  let checks := (c.calls i).zip ([Check.encode, Check.echo].zip rs)
-  match checks.map (fun (call, k, r) => judge k call r) |>.find? (!·.isAgree) with
+  let check (call : Call) : Check := match call.mutation with
+    | some l => .mutant l call.success call.returndata
+    | none => if call.calldata == selectorHex i then .encode else .echo
+  match ((c.calls i).zip rs).map (fun (call, r) => judge (check call) call r)
+      |>.find? (!·.isAgree) with
   | some o => o
   | none => .agree
 

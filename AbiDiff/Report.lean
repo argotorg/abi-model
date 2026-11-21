@@ -51,13 +51,18 @@ def wordTable (exp : List (String × Word)) (actualHex : String) : String := Id.
 def Check.describe (i : Nat) : Check → String
   | .encode => s!"`{methodName i}()` (encoding)"
   | .echo => s!"`{echoName i}(v)` (decoding the model's calldata and re-encoding)"
+  | .mutant l s e =>
+      s!"`{echoName i}` on mutated calldata ({l}; the model's strict decoder " ++
+        (if s then s!"returns `0x{e}`)" else s!"reverts with `0x{e}`)")
 
 def caseBlock (id : Nat) (c : Case) (o : Outcome) : String :=
   let src := s!"```solidity\n{(solMethod id c).trimAsciiEnd.toString}\n```\n"
   match o with
   | .diverge k "failure" msg => src ++ s!"\nThe call {k.describe id} **reverted** ({msg}).\n"
+  | .diverge k@(.mutant ..) actual msg =>
+      src ++ s!"\nThe call {k.describe id} {msg}.\n\nActual: `0x{actual}`\n"
   | .diverge k actual msg =>
-      let exp := match k with | .encode => c.expected | .echo => c.expectedEcho
+      let exp := match k with | .encode => c.expected | _ => c.expectedEcho
       src ++ s!"\nThe call {k.describe id} {msg}.\n\n" ++ wordTable exp actual
   | .compileFail err =>
       let lines := (err.splitOn "\n").filter (!·.trimAscii.isEmpty) |>.take 12

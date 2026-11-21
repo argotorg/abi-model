@@ -355,6 +355,14 @@ two solcore-rs methods and the calls that check them against the model:
   derives it (`AbiDiff.paramSig`): products are flattened into one tuple, and
   an enum signs as its generic representation, e.g.
   `enum E { A(uint256), B(bool, uint256), C }` as `sum(uint256,sum(bool,uint256,))`.
+- the same `echoI` is also called on **mutated calldata**, with the strict
+  decoder `decStrict` as the oracle: if it decodes the mutated arguments to
+  `v'`, the call must return `encodeBytes v'`, and if it fails, the call must
+  revert with that error's data. The mutations (`AbiDiff.Case.mutations`) are
+  derived from the roles of the canonical words: an offset `+ 1` (unaligned) or
+  `2^256 - 1`, a length `+ 1` or `2^255`, a sum tag `7`, an unknown enum tag, a
+  data word `2`, dirty padding, the input truncated by one byte or to less than
+  the head, and a trailing word. At most 15 per case.
 
 Each batch of cases is one
 contract, compiled with `solcore --emit-yul` and `solc`, deployed on Anvil

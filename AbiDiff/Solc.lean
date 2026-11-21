@@ -1,5 +1,6 @@
 import Lean.Data.Json
 import AbiModel.EncodeAnn
+import AbiModel.DecodeStrict
 import AbiModel.FFI.Keccak
 
 /-!
@@ -335,7 +336,13 @@ def selectorHex (i : Nat) : String := hexPad 8 (FFI.selector s!"{methodName i}()
 structure Call where
   label : String
   calldata : String
+  /-- Whether the call must succeed (or revert). -/
+  success : Bool := true
+  /-- The return data, or the revert data. -/
   returndata : String
+  /-- Which check the call is: `none` for the encoding and echo calls, the
+      mutation's description for a mutated echo call. -/
+  mutation : Option String := none
 
 /-- The call that checks case `i`'s encoding: `caseI()` returns `abi_encode(v)`. -/
 def Case.call (c : Case) (i : Nat) : Call :=
@@ -350,8 +357,74 @@ def Case.echoCall (c : Case) (i : Nat) : Option Call := do
   let args := hexWire (encodeBytes c.t c.v)
   pure { label := s!"{echoName i}: {c.describe}", calldata := sel ++ args, returndata := args }
 
-/-- The calls of case `i`: the encoder check, then the decoder check if any. -/
-def Case.calls (c : Case) (i : Nat) : List Call := c.call i :: (c.echoCall i).toList
+/-! ## Mutated calldata
+
+Each echo call also runs on mutated calldata, with `decStrict` as the oracle: if
+it decodes the mutated arguments to `v'`, the call must return `encodeBytes v'`;
+if it fails, the call must revert with that error's data. The mutations are
+derived from the roles of the canonical encoding's words (`encodeAnn`), so each
+one targets a check of the decoder: offsets that are unaligned or out of range,
+lengths too large, sum tags other than `0`/`1`, unknown enum tags, non-boolean
+data words, dirty padding, truncated input and trailing bytes.
+-/
+
+/-- A mutated argument encoding. -/
+structure Mutation where
+  label : String
+  input : Input
+
+/-- The first `size` bytes of `words`, in hex (zero bytes past the words). -/
+def inputHex (I : Input) : String :=
+  let h := hexWire I.words
+  let h := h ++ String.ofList (List.replicate (2 * I.size - min h.length (2 * I.size)) '0')
+  String.ofList (h.toList.take (2 * I.size))
+
+/-- Mutations of one word, by its role. -/
+def cellMutations (i : Nat) (c : Cell) : List (String × Word) :=
+  match c.role with
+  | .off => [(s!"offset word {i} + 1 (unaligned)", c.val + 1),
+             (s!"offset word {i} = 2^256-1", natW maxWord)]
+  | .len => [(s!"length word {i} + 1", c.val + 1), (s!"length word {i} = 2^255", natW (2 ^ 255))]
+  | .tag => if c.val.toNat ≤ 1 then [(s!"sum tag word {i} = 7", 7)]
+            else [(s!"enum tag word {i} unknown", c.val ^^^ 1)]
+  | .data => [(s!"data word {i} = 2", 2)]
+  | .pad => [(s!"padding word {i} = 0xdead", 0xdead)]
+
+/-- At most `k` elements of `xs`, evenly spread. -/
+def spread (k : Nat) (xs : List α) : List α :=
+  if xs.length ≤ k then xs
+  else
+    let step := (xs.length + k - 1) / k
+    (xs.zipIdx.filter fun (_, j) => j % step == 0).map (·.1)
+
+def Case.mutations (c : Case) : List Mutation :=
+  if !c.echoes then [] else
+  let cells := encodeAnn 32 c.t c.v
+  let W := cells.map (·.val)
+  let n := 32 * W.length
+  let h := 32 * headWords c.t
+  let truncs := ([n - 1, h - 1].filter fun k => 0 < k + 1 && k < n && (k != h - 1 || h > 0)).eraseDups
+  let words := (cells.zipIdx.flatMap fun (cell, i) =>
+    (cellMutations i cell).map fun (l, w) => (l, i, w))
+  truncs.map (fun k => { label := s!"truncated to {k} bytes", input := ⟨W, k⟩ }) ++
+    [{ label := "a trailing word", input := ⟨W ++ [natW 0xdead], n + 32⟩ }] ++
+    (spread 12 words).map fun (l, i, w) => { label := l, input := ⟨W.set i w, n⟩ }
+
+/-- The call that checks how case `i`'s echo method decodes `m`. -/
+def Case.mutantCall (c : Case) (i : Nat) (sig : String) (m : Mutation) : Call :=
+  let sel := hexPad 8 (FFI.selector s!"{echoName i}({sig})").toNat
+  let (success, ret) := match decStrict c.t m.input with
+    | .ok v' => (true, hexWire (encodeBytes c.t v'))
+    | .error e => (false, e.revertHex)
+  { label := s!"{echoName i} [{m.label}]: {c.describe}", calldata := sel ++ inputHex m.input,
+    success, returndata := ret, mutation := some m.label }
+
+/-- The calls of case `i`: the encoder check, then the decoder checks if any. -/
+def Case.calls (c : Case) (i : Nat) : List Call :=
+  c.call i :: (c.echoCall i).toList ++
+    match paramSig c.t with
+    | some sig => c.mutations.map (c.mutantCall i sig)
+    | none => []
 
 /-- Model prediction for the echo call's return data, labelled by role. -/
 def Case.expectedEcho (c : Case) : List (String × Word) :=
@@ -394,7 +467,8 @@ def directiveString (s : String) : String :=
     contract, then one `raw` call per check with the predicted return data. -/
 def scenario (name : String) (calls : List Call) : String :=
   let raw (c : Call) :=
-    s!"// #[raw(0x{c.calldata}, label = {directiveString c.label}) -> success(0x{c.returndata})]\n"
+    s!"// #[raw(0x{c.calldata}, label = {directiveString c.label}) -> " ++
+      s!"{if c.success then "success" else "revert"}(0x{c.returndata})]\n"
   s!"// #[scenario({directiveString name})]\n// constructor()\n// #[deploy(0x) -> success]\n" ++
     String.join (calls.map raw)
 
