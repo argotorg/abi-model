@@ -55,7 +55,8 @@ Encoding is **head/tail canonical**, aligned with the std `ABIEncode.encodeInto`
 
 Offsets are **word-indexed** in `encode`; the std's byte offset is `32 ×` this.
 `AbiModel/EncodeAnn.lean` gives the byte-level wire (`encodeBytes`) and proves it
-equal to `encode` at unit scale (`encodeAnn_one`).
+equal to `encode` at unit scale (`encodeAnn_one`), and the wire with every offset
+word `× 32` at byte scale (`encodeBytes_eq`, `encodeBytes_length`).
 
 The decoder is base-relative (it follows offsets), total (out-of-bounds reads
 give `0`) and **lenient** on tags like the real one: `tag = 0` means `inl`, any
