@@ -457,9 +457,13 @@ harness before it moved to solcore-rs:
 
 ## Continuous integration
 
-- `lean_action_ci.yml`: `lake build` on every push and pull request.
+- `lean_action_ci.yml`: `lake build` and `lake test`, without Nix, on every
+  push and pull request.
 - `solcore_diff.yml`: the fixed cases and 100 random cases (seeded with the run
-  number) against the pinned solcore-rs and, on manual runs, the current
-  solcore-rs main. Automatic runs are disabled until the model agrees with
-  solcore-rs on the fixed cases. The reports go to the job summary, and the
-  reports, regressions and batches are uploaded as artifacts.
+  number) against the pinned solcore-rs on every push to `main` and every pull
+  request, and also against the current solcore-rs main weekly and on manual
+  runs. The Nix store is cached (`cache-nix-action`, keyed by the flake's pins,
+  with the `solcore` build kept as a GC root), as are elan's toolchain and the
+  lake build (`actions/cache`), so a run rebuilds `solcore` only when the pins
+  move. The reports go to the job summary, and the reports, regressions and
+  batches are uploaded as artifacts.

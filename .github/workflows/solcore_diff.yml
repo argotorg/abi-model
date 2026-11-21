@@ -1,16 +1,15 @@
 name: Differential test against solcore-rs
 
-# Automatic runs (push, pull_request and the weekly schedule) are disabled
-# until the model agrees with solcore-rs on the fixed cases (see the README's
-# "Known differences"); until then the workflow only runs when triggered
-# manually.
+# Every push to main and every pull request runs the fixed and random cases
+# against the solcore-rs pinned in flake.lock; the weekly schedule (and manual
+# runs) also run them against the current solcore-rs main.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
-  # push:
-  # pull_request:
-  # schedule:
-  #   # weekly, against the current solcore-rs main (see the matrix below)
-  #   - cron: "0 6 * * 1"
+  schedule:
+    - cron: "0 6 * * 1"
 
 jobs:
   diff:
@@ -24,6 +23,31 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+
+      # The Nix store, with the `solcore` built from solcore-rs (the slow part:
+      # a Rust build) and the pinned solc, foundry and Lean toolchain. The key
+      # follows the flake's pins, so a pinned run rebuilds only when they move.
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ matrix.solcore }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ matrix.solcore }}-
+          gc-max-store-size-linux: 6G
+
+      # elan's Lean toolchain and lake's build of the model and the harness
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.elan
+            .lake
+          key: lean-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}-${{ hashFiles('**/*.lean', 'c/**') }}
+          restore-keys: lean-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}-
+
+      - name: Build solcore
+        run: |
+          override=()
+          [[ "${{ matrix.solcore }}" == main ]] && override=(--override-input solcore-rs github:argotorg/solcore-rs)
+          # the out-link is a GC root, so the cache keeps the build
+          nix build "${override[@]}" .#solcore -o result-solcore
 
       - name: Fixed cases
         id: fixed
