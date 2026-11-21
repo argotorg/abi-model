@@ -27,9 +27,8 @@ def armWords : (t : Ty) → (cs : Ctors) → Value t ⊕ ValueC cs → Nat
   | _, .last _ u, .inr _ => headWords u
 
 /-!
-Canonical ABI encoder in the head/tail scheme (word-indexed), aligned with the
-std `ABIEncode.encodeInto` / `abi_encode` (`std/std.sol:1365,1458`) and
-`doc/src/core/abi-encoding-decoding.md`.
+Canonical ABI encoder in the head/tail scheme (word-indexed), aligned with
+solcore-rs's `ABIEncode.encodeInto` / `abi_encode` (`std/std.sol`).
 
 `encode t v = encHead t v (headWords t) ++ encTail t v`. The head has fixed width
 `headWords t`; a *dynamic* node writes a single offset word into the head pointing
@@ -37,13 +36,13 @@ at where its data begins in the shared tail (`tb`). A `pair` lays its components
 inline in the head and threads the tail cursor; a dynamic `sum`/`tup`/`array`
 places one offset word and puts its `[..]` block in the tail.
 
-A dynamic sum's tail block mirrors `ABIGeneric.sol`'s `encodeInto`: it is
+A dynamic sum's tail block mirrors `std/ABIGeneric.sol`'s `encodeInto`: it is
 `[tag | branch head | padding | branch tail]`, where the branch head is padded to
 the widest branch (`max (headWords a) (headWords b)`) and the branch's own offsets
 are relative to the *tag word* (the std's `newBase = tail`, branch at offset 32).
 
 An `enum` (a derived multi-constructor type) mirrors the derived `ABIEncode`
-(`DeriveGeneric.buildABIEncodeSum` → `encodeVariant`): the same static/dynamic
+(solcore-rs `specialize/src/specialize/derived_abi.rs` → `encodeVariant`): the same static/dynamic
 layout, but a single `ctorTag` word (`keccak256("Name(argSigs)")`) for the whole
 enum instead of one `0`/`1` word per level of its rep. Both a static enum's head
 and a dynamic enum's tail block reserve the tag word and the widest payload head

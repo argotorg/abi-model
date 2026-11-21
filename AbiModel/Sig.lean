@@ -4,14 +4,15 @@ import AbiModel.FFI.Keccak
 namespace AbiModel
 
 /-!
-ABI signature strings, aligned with the `SigString` instances in
+ABI signature strings, aligned with the `SigString` instances of solcore-rs's
 `std/dispatch.sol`, and the per-constructor enum tags built from them
-(`DeriveGeneric.tagE`: `keccakLit("Name(" + sigStr(rep) + ")")`).
+(`specialize/src/specialize/derived_abi.rs`, `variant_abi_tag`:
+`keccakLit("Name(" + sigStr(rep) + ")")`).
 
 `word` stands for `uint256`. An enum signs as its SOP rep (the `Generic` default
-instance), i.e. structurally as nested `sum(...)`, never by its name. solcore has
-no `SigString` for `ABITuple`, so `tup` signs as its contents; and only
-`calldata<array<t>>` signs as `t[]`.
+instance), i.e. structurally as nested `sum(...)`, never by its name. The std
+has no `SigString` for `ABITuple`, so `tup` signs as its contents; both
+`calldata<array<t>>` and `memory<DynArray<t>>` sign as `t[]`.
 -/
 mutual
 

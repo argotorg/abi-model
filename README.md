@@ -1,9 +1,11 @@
 # abi-model
 
-A Lean 4 model of Solcore's ABI encoding/decoding for **algebraic data types**,
-aligned with the documentation (`solcore/doc/src/core/abi-encoding-decoding.md`)
-and the std library (`std/std.sol`, `std/ABIGeneric.solc`). The project has two
-parts:
+A Lean 4 model of Core Solidity's ABI encoding/decoding for **algebraic data
+types**, as implemented by
+[solcore-rs](https://github.com/argotorg/solcore-rs): its std library
+(`std/std.sol`, `std/ABIGeneric.sol`, `std/dispatch.sol`) and the ABI code it
+derives for enums (`crates/specialize/src/specialize/derived_abi.rs`). The
+project has two parts:
 
 1. a **verified model**: an encoder, a decoder and machine-checked
    **round-trip** theorems (no `sorry`);
@@ -17,7 +19,7 @@ The type universe (`AbiModel/Ty.lean`) is the algebraic core of the ABI plus
 dynamic arrays:
 
 - products are right-nested `pair`s;
-- the primitive **binary sum** `sum f g` (`ABIGeneric.sol`'s `sum<f, g>`), with a
+- the primitive **binary sum** `sum f g` (`std/ABIGeneric.sol`'s `sum<f, g>`), with a
   tag word `0 = inl`, `1 = inr` at every nesting level;
 - a derived **multi-constructor enum** `enum n₀ t₀ cs` (solcore-rs
   `derived_abi.rs`), static exactly when its SOP rep `sum<t₀, sum<t₁, …>>` is,
@@ -141,8 +143,8 @@ distinct-tags condition in `Fits`:
 of which fails at elaboration unless it holds: round trips on concrete values and
 exact wire layouts. Checks involving enums evaluate tags, i.e. the FFI, so they
 live in the natively compiled `AbiTest` library: `AbiTest/Enum.lean` checks enum
-round trips and wires, including the wire of solcore's `rtS2` test and the tags
-and selector from solcore's test expectations. `AbiTest/Keccak.lean` checks the
+round trips and wires, including the wire of solcore-rs's `rtS2` test and the tags
+and selector from its E2E expectations (`tests/e2e/abi-sum-roundtrip`). `AbiTest/Keccak.lean` checks the
 FFI `keccak256` against OpenSSL known answers. The whole project builds with
 **no `sorry`**.
 

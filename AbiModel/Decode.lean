@@ -48,9 +48,9 @@ def decAt : (t : Ty) → Wire → Nat → Nat → Value t
   termination_by t => (sizeOf t, 1, 0)
 
 /-- Dispatch on an enum's tag word, decoding the selected constructor's payload
-    head at `base + ho`. Like the derived solcore decoder
-    (`DeriveGeneric.buildABIDecodeSum`), each constructor but the last is matched
-    by its `ctorTag` in order and the last is the default (lenient on unknown tags). -/
+    head at `base + ho`. Each constructor but the last is matched by its
+    `ctorTag` in order and the last is the default (lenient on unknown tags,
+    where solcore-rs's derived decoder reverts). -/
 def decArm : (n : String) → (t : Ty) → (cs : Ctors) → Wire → Nat → Nat → Word →
     Value t ⊕ ValueC cs
   | n, t, .cons m u cs, W, base, ho, tag =>

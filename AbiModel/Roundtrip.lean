@@ -200,7 +200,7 @@ mutual
     enums the value passes through must hash to distinct words, not keccak as a
     whole (which cannot be injective: it maps all byte strings to 256 bits, so a
     global injectivity axiom would be inconsistent). It holds when the
-    signatures are distinct (solcore rejects duplicate constructor names, and
+    signatures are distinct (solcore-rs rejects duplicate constructor names, and
     distinct names give distinct signatures) and keccak has no collision among
     them, the standard cryptographic assumption. Since `keccak256` is opaque, it
     cannot be discharged by `decide`; for concrete types it is checked by native

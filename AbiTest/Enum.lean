@@ -9,7 +9,7 @@ Enum checks. Constructor tags are `keccak256("Name(argSigs)")` computed by the F
 
 namespace AbiModel
 
--- tags from solcore's `test/examples/dispatch/abi_sum_roundtrip.json`
+-- tags from solcore-rs's `tests/e2e/abi-sum-roundtrip`
 #guard ctorTag "L" .word = 0x9579c5ddf61e49d0bf336001c25c13f5689ee1abeee1a378b6bef308961641ec#256
 #guard ctorTag "X" .word = 0x337229d96e709f076d800bbc51bd1a1c2d4bef08e1bc014b6824ac7256f23c43#256
 #guard ctorTag "P" .word = 0x5e1331e0b0cf9596f31b4ecaa4d4d045bc6de1b91d2401dff29221cab1c175b4#256
@@ -21,10 +21,10 @@ namespace AbiModel
 
 /-! ### Derived enums: one `keccak256("Name(argSigs)")` tag word -/
 
-/-- `enum S2 { P(uint256), Q(uint256) }` (solcore `abi_sum_roundtrip.sol`). -/
+/-- `enum S2 { P(uint256), Q(uint256) }` (solcore-rs `tests/e2e/abi-sum-roundtrip`). -/
 abbrev S2 : Ty := .enum "P" .word (.last "Q" .word)
 
--- exact wire of solcore's `rtS2(P(9))` / `rtS2(Q(8))` (static: inline [tag][field])
+-- exact wire of solcore-rs's `rtS2(P(9))` / `rtS2(Q(8))` (static: inline [tag][field])
 #guard wireIs S2 (Sum.inl 9)
   [0x5e1331e0b0cf9596f31b4ecaa4d4d045bc6de1b91d2401dff29221cab1c175b4, 9]
 #guard wireIs S2 (Sum.inr 8)

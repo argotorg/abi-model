@@ -3,9 +3,9 @@ import AbiModel.EncodeAnn
 import AbiModel.FFI.Keccak
 
 /-!
-Rendering model cases as Solcore source and as the test runner's hex strings.
+Rendering model cases as solcore-rs source and as the test runner's hex strings.
 
-A `Case` is a type of the model together with a value of it. Its Solcore source
+A `Case` is a type of the model together with a value of it. Its source
 is produced from the same `Ty`/`Value` the model encodes, with an explicit type
 annotation, so every generated method is well typed by construction as long as
 the type is `supported` (i.e. the std library has the ABI instances for it).
@@ -51,10 +51,10 @@ def hexToWords (s : String) : List Nat :=
 /-! ## Types and values -/
 
 /-!
-An enum constructor's fields invert `constrRep` (`DeriveGeneric.hs`): a `unit`
-payload is a nullary constructor, a right-nested `pair` is several fields, and
-anything else is one field. The tag solcore derives from the declaration is then
-the model's `ctorTag`.
+An enum constructor's fields invert the representation solcore-rs derives
+(`constructor_rep_ty`): a `unit` payload is a nullary constructor, a
+right-nested `pair` is several fields, and anything else is one field. The tag
+solcore-rs derives from the declaration is then the model's `ctorTag`.
 -/
 
 mutual
@@ -82,7 +82,7 @@ def showCtors : Ctors → String
 
 end
 
-/-- The Solcore name of an enum type. Model enums have no type name, so it is
+/-- The source name of an enum type. Model enums have no type name, so it is
     derived from the structure: equal enums share one declaration. -/
 def enumName (t : Ty) : String := "E_" ++ hexPad 16 (hash (showTy t)).toNat
 
@@ -104,7 +104,7 @@ end
 
 mutual
 
-/-- The Solcore type of a model type, when the std can `abi_encode` it from memory. -/
+/-- The solcore-rs type of a model type, when the std can `abi_encode` it from memory. -/
 def solTy : Ty → Option String
   | .unit => some "()"
   | .word => some "uint256"

@@ -5,7 +5,7 @@ import AbiDiff.Solc
 Random cases for the differential test.
 
 Generation is type-directed: a `Ty` is drawn from the grammar of types the std
-can `abi_encode` (`supported`), then a `Value` of that type, so the Solcore source
+can `abi_encode` (`supported`), then a `Value` of that type, so the source
 rendered from it is well typed by construction. Shrinking goes through Plausible's
 `Shrinkable`; the test loop itself is driven from `IO` because the oracle
 (compiling and running a contract) is external and works in batches.

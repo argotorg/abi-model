@@ -39,7 +39,7 @@ lean_lib AbiTest where
 lean_exe abitest where
   root := `Main
 
-/-- Differential test harness against Solcore (see `scripts/diff-solcore.sh`). -/
+/-- Differential test harness against solcore-rs (see `scripts/diff-solcore.sh`). -/
 @[default_target]
 lean_lib AbiDiff
 

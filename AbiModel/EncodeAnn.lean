@@ -103,7 +103,7 @@ end
 def encodeAnn (sc : Nat) (t : Ty) (v : Value t) : List Cell :=
   annHead sc t v (headWords t) ++ annTail sc t v
 
-/-- The byte-level wire (offsets in bytes), as Solcore's `abi_encode` lays it out. -/
+/-- The byte-level wire (offsets in bytes), as solcore-rs's `abi_encode` lays it out. -/
 def encodeBytes (t : Ty) (v : Value t) : Wire := (encodeAnn 32 t v).map (·.val)
 
 end AbiModel

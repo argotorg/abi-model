@@ -14,8 +14,9 @@ inductive Ty where
   | array : Ty → Ty
   /-- A derived multi-constructor enum: a first constructor `name(payload)` and the
       remaining (at least one) constructors. Each payload is the constructor's
-      `constrRep` (`DeriveGeneric.hs`): `unit` for no fields, the field's type
-      for one field, a right-nested `pair` for several. Unlike the primitive
+      representation (solcore-rs `hir-ty/src/solver/derived_generic.rs`,
+      `constructor_rep_ty`): `unit` for no fields, the field's type for one
+      field, a right-nested `pair` for several. Unlike the primitive
       `sum`, an enum carries a single `keccak256("Name(argSigs)")` tag word. -/
   | enum  : String → Ty → Ctors → Ty
 
