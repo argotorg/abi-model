@@ -9,4 +9,5 @@ import AbiModel.Roundtrip
 import AbiModel.EncodeAnn
 import AbiModel.DecodeStrict
 import AbiModel.RoundtripStrict
+import AbiModel.External
 import AbiModel.FFI.Keccak

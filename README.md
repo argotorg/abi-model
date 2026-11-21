@@ -244,6 +244,7 @@ FFI `keccak256` against OpenSSL known answers. The whole project builds with
 | `AbiModel/Ty.lean`         | `Ty`/`Ctors` (+ `array`, `enum`), `isStatic`, `headWords`        |
 | `AbiModel/Val.lean`        | `Value : Ty → Type` (dependent; `array a ↦ List`)                |
 | `AbiModel/Sig.lean`        | ABI signature strings (`sigStr`) and enum tags (`ctorTag`)       |
+| `AbiModel/External.lean`   | the external ABI boundary (`isExternal`) and selectors (`extSig`) |
 | `AbiModel/Encode.lean`     | head/tail `encode` with word offsets (`encHead`/`encTail`)       |
 | `AbiModel/EncodeAnn.lean`  | byte-offset encoder with word roles (`encodeBytes`)              |
 | `AbiModel/Decode.lean`     | base-relative `decode` following offsets (`decAt`/`decSeq`)      |
@@ -348,12 +349,13 @@ two solcore-rs methods and the calls that check them against the model:
   by the model's encoding of `v` as calldata, and must return those argument
   bytes unchanged: the dispatcher decodes them and re-encodes the result. This
   checks the decoder on canonical input. It is generated only when solcore-rs
-  accepts `T` as a public parameter: `uint256`, `bool`,
-  `memory<DynArray<uint256>>`, products of these without `()`, and derived
-  enums (whose payloads may hold sums). Sums, `ABITuple` and `()` are rejected
-  by its dispatch ABI. The selector signature is computed as solcore-rs
-  derives it (`AbiDiff.paramSig`): products are flattened into one tuple, and
-  an enum signs as its generic representation, e.g.
+  accepts `T` as a public parameter (`AbiModel.isExternal`,
+  `AbiModel/External.lean`): `uint256`, `bool`, `memory<DynArray<uint256>>`,
+  products of these without `()`, and derived enums (whose payloads may hold
+  sums and `()`, but no `ABITuple`). Sums, `ABITuple` and `()` are rejected by
+  its dispatch ABI. The selector signature is the one solcore-rs derives
+  (`AbiModel.extSig`): products are flattened into one tuple, and an enum signs
+  as its generic representation, the model's `sigStr`, e.g.
   `enum E { A(uint256), B(bool, uint256), C }` as `sum(uint256,sum(bool,uint256,))`.
 - the same `echoI` is also called on **mutated calldata**, with the strict
   decoder `decStrict` as the oracle: if it decodes the mutated arguments to

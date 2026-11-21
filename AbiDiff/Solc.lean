@@ -1,6 +1,7 @@
 import Lean.Data.Json
 import AbiModel.EncodeAnn
 import AbiModel.DecodeStrict
+import AbiModel.External
 import AbiModel.FFI.Keccak
 
 /-!
@@ -267,55 +268,9 @@ calldata. The dispatcher decodes it and re-encodes the result, so the call
 checks the decoder: it must return the calldata's argument bytes unchanged.
 -/
 
-mutual
-
-/-- The signature fragment solcore-rs derives for a type inside an enum's
-    generic representation (`generic_sig_string`, `hir-ty/src/contract/abi.rs`):
-    products are flattened without parentheses, `unit` is empty, a sum is
-    `sum(a,b)`, and an enum is its representation, a right-nested sum of its
-    constructors' payloads (`derived_generic.rs`). -/
-def repSig : Ty → Option String
-  | .unit => some ""
-  | .word => some "uint256"
-  | .bool => some "bool"
-  | .pair a b => do pure s!"{← repSig a},{← repSig b}"
-  | .sum a b => do pure s!"sum({← repSig a},{← repSig b})"
-  | .tup _ => none
-  | .array .word => some "uint256[]"
-  | .array _ => none
-  | .enum _ t cs => repSigArms t cs
-  termination_by t => (sizeOf t, 1)
-
-def repSigArms : Ty → Ctors → Option String
-  | t, .last _ u => do pure s!"sum({← repSig t},{← repSig u})"
-  | t, .cons _ u cs => do pure s!"sum({← repSig t},{← repSigArms u cs})"
-  termination_by t cs => (sizeOf t + sizeOf cs, 0)
-  decreasing_by all_goals simp_wf; all_goals first | omega | (have := Ctors.sizeOf_pos ‹Ctors›; omega)
-
-end
-
-mutual
-
-/-- The selector signature of a parameter type (`signature_type_string`), or
-    `none` when solcore-rs's dispatch rejects the type: `unit` (also as a
-    product member), sums, `ABITuple`, and arrays of anything but `uint256`.
-    Nested products are flattened into one tuple. -/
-def paramSig : Ty → Option String
-  | .word => some "uint256"
-  | .bool => some "bool"
-  | .array .word => some "uint256[]"
-  | .pair a b => do pure ("(" ++ ",".intercalate ((← paramFields a) ++ (← paramFields b)) ++ ")")
-  | .enum n t cs => repSig (.enum n t cs)
-  | _ => none
-  termination_by t => (sizeOf t, 1)
-
-def paramFields : Ty → Option (List String)
-  | .pair a b => do pure ((← paramFields a) ++ (← paramFields b))
-  | .unit => none
-  | t => do pure [← paramSig t]
-  termination_by t => (sizeOf t, 2)
-
-end
+/-- The selector signature of a parameter type, or `none` when solcore-rs's
+    dispatch rejects the type (`AbiModel.isExternal`, `AbiModel.extSig`). -/
+def paramSig (t : Ty) : Option String := if isExternal t then some (extSig t) else none
 
 /-- Whether the case also checks the decoder through an `echo` method. -/
 def Case.echoes (c : Case) : Bool := supported c.t && (paramSig c.t).isSome
